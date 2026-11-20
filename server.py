@@ -32,6 +32,9 @@ APPROVAL_SECONDS = 50
 CAPTURE_SECONDS = 8
 CAPTURE_TIMEOUT = 'Mac에서 화면을 가져오는 데 시간이 너무 오래 걸렸어.'
 CAPTURE_STOPPED = 'Mac에서 화면 공유를 종료했어.'
+INPUT_SECONDS = 5
+INPUT_TIMEOUT = 'Mac이 입력 결과를 보내지 않았어. 다시 보내기 전에 Mac 화면을 확인해.'
+INPUT_STOPPED = 'Mac에서 원격 입력을 종료했어.'
 helper_lock = threading.Lock()
 publish_lock = threading.Lock()
 
@@ -126,6 +129,75 @@ class AppCapture:
             capture, self.pending = self.pending, None
             if capture is not None and not capture.done.is_set():
                 capture.finish(error=CAPTURE_STOPPED)
+
+
+class InputRequest:
+    def __init__(self):
+        self.id = str(uuid4())
+        self.deadline = time.monotonic() + INPUT_SECONDS
+        self.expires_at = time.time() + INPUT_SECONDS
+        self.done = threading.Event()
+        self.error = None
+
+    def finish(self, error):
+        self.error = error
+        self.done.set()
+
+
+class AppInput:
+    def __init__(self, publish):
+        self.publish = publish
+        self.lock = threading.Lock()
+        self.pending = None
+        self.stopped = False
+
+    def perform(self, args):
+        with self.lock:
+            if self.stopped:
+                raise RuntimeError(INPUT_STOPPED)
+            if self.pending is not None:
+                raise RuntimeError('Mac에서 다른 입력을 처리 중이야.')
+            operation = InputRequest()
+            try:
+                self.publish({'event': 'input', 'id': operation.id, 'args': args, 'expiresAt': operation.expires_at})
+            except OSError:
+                raise RuntimeError(INPUT_STOPPED) from None
+            self.pending = operation
+
+        if not operation.done.wait(timeout=max(0, operation.deadline - time.monotonic())):
+            with self.lock:
+                if not operation.done.is_set():
+                    # The launcher may have performed the input. Never dispatch it twice.
+                    operation.finish(INPUT_TIMEOUT)
+        if operation.error is not None:
+            raise RuntimeError(operation.error)
+
+    def resolve(self, result):
+        if not isinstance(result, dict) or 'error' not in result:
+            return
+        error = result['error']
+        if error is not None and not isinstance(error, str):
+            return
+        with self.lock:
+            operation = self.pending
+            if operation is None or result.get('input') != operation.id:
+                return
+            self.pending = None
+            if operation.done.is_set():
+                return
+            if time.monotonic() >= operation.deadline:
+                operation.finish(INPUT_TIMEOUT)
+            else:
+                if error is not None:
+                    error = error.strip()[:800] or 'Mac에 입력을 보내지 못했어.'
+                operation.finish(error)
+
+    def stop(self):
+        with self.lock:
+            self.stopped = True
+            operation, self.pending = self.pending, None
+            if operation is not None and not operation.done.is_set():
+                operation.finish(INPUT_STOPPED)
 
 
 class RemoteState:
@@ -233,10 +305,11 @@ class RemoteState:
 
 
 class RemoteHTTPServer(ThreadingHTTPServer):
-    def __init__(self, address, context, state, app_capture=None):
+    def __init__(self, address, context, state, app_capture=None, app_input=None):
         self.context = context
         self.state = state
         self.app_capture = app_capture
+        self.app_input = app_input
         self.public_host = None
         self.request_slots = threading.BoundedSemaphore(24) if state.internet else None
         super().__init__(address, Handler)
@@ -244,6 +317,8 @@ class RemoteHTTPServer(ThreadingHTTPServer):
     def stop_operations(self):
         if self.app_capture is not None:
             self.app_capture.stop()
+        if self.app_input is not None:
+            self.app_input.stop()
         self.state.stop()
 
     def process_request(self, request, client_address):
@@ -299,6 +374,10 @@ def valid_action(data):
         value = data.get('text')
         if not isinstance(value, str) or not value or len(value) > 2000 or '\x00' in value:
             raise ValueError('입력할 글자를 확인해줘.')
+        try:
+            value.encode('utf-8')
+        except UnicodeEncodeError:
+            raise ValueError('입력할 글자를 확인해줘.') from None
         return ['type', value]
     raise ValueError('지원하지 않는 동작이야.')
 
@@ -430,7 +509,11 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(200, {'ok': True}, [('Set-Cookie', 'mac_remote=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0')])
         if path == '/api/action':
             try:
-                run_helper(valid_action(data))
+                args = valid_action(data)
+                if self.server.app_input is not None:
+                    self.server.app_input.perform(args)
+                else:
+                    run_helper(args)
                 return self.send_json(200, {'ok': True})
             except ValueError as exc:
                 return self.send_json(400, {'error': str(exc)})
@@ -443,12 +526,16 @@ def read_commands(server, stopped):
     try:
         for line in sys.stdin:
             line = line.strip()
-            if line.startswith('{') and server.app_capture is not None:
+            if line.startswith('{'):
                 try:
                     result = json.loads(line)
                 except ValueError:
                     continue
-                server.app_capture.resolve(result)
+                if isinstance(result, dict):
+                    if 'capture' in result and server.app_capture is not None:
+                        server.app_capture.resolve(result)
+                    elif 'input' in result and server.app_input is not None:
+                        server.app_input.resolve(result)
                 continue
             parts = line.split()
             if parts == ['pair']:
@@ -498,7 +585,7 @@ def main():
     if args.internet and args.host not in (None, '127.0.0.1'):
         parser.error('인터넷 연결 모드의 서버는 이 Mac 안에서만 열 수 있어.')
     host = '127.0.0.1' if args.internet else args.host or '0.0.0.0'
-    if not HELPER.is_file():
+    if not args.app_capture and not HELPER.is_file():
         raise SystemExit('Mac 제어 도구를 찾을 수 없어. 앱을 다시 빌드해.')
     os.umask(0o077)
     ips = local_addresses()
@@ -507,7 +594,8 @@ def main():
     profile = certificates.export_safari_profile()
     state = RemoteState(publish, internet=args.internet)
     app_capture = AppCapture(publish) if args.app_capture else None
-    with RemoteHTTPServer((host, args.port), context, state, app_capture=app_capture) as server:
+    app_input = AppInput(publish) if args.app_capture else None
+    with RemoteHTTPServer((host, args.port), context, state, app_capture=app_capture, app_input=app_input) as server:
         bound_host, port = server.server_address
         ready = {'port': port, 'certificate': str(certificates.public_cert), 'profile': str(profile)}
         stopped = threading.Event()
