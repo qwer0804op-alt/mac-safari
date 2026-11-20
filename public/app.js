@@ -9,6 +9,7 @@ const loginMessage = $('loginMessage');
 const screen = $('screen');
 const sessionEnded = '연결이 종료됐어. Mac에서 새 코드를 받아.';
 const screenTimeoutMs = 18000;
+const actionTimeoutMs = 18000;
 let session = null;
 let internetMode = false;
 let refreshTimer = null;
@@ -259,8 +260,20 @@ function sendAction(action) {
   const currentSession = session;
   actionQueue = actionQueue.then(async () => {
     if (currentSession !== session || logoutPending || document.hidden) return false;
+    const request = new AbortController();
+    const abort = () => request.abort();
+    const cancelled = new Promise((_, reject) => {
+      request.signal.addEventListener('abort', () => {
+        reject(new Error('Mac의 조작 응답을 받지 못했어. 화면을 확인하고 다시 눌러.'));
+      }, { once: true });
+    });
+    currentSession.signal.addEventListener('abort', abort, { once: true });
+    const deadline = setTimeout(abort, actionTimeoutMs);
     try {
-      await api('/api/action', { ...jsonOptions(action), signal: currentSession.signal });
+      await Promise.race([
+        api('/api/action', { ...jsonOptions(action), signal: request.signal }),
+        cancelled,
+      ]);
       if (currentSession !== session) return false;
       $('controlMessage').textContent = '';
       return true;
@@ -270,6 +283,9 @@ function sendAction(action) {
         else $('controlMessage').textContent = error.message;
       }
       return false;
+    } finally {
+      clearTimeout(deadline);
+      currentSession.signal.removeEventListener('abort', abort);
     }
   });
   return actionQueue;
@@ -298,8 +314,12 @@ screen.addEventListener('pointerup', (event) => {
   }
   gesture = null;
 });
-screen.addEventListener('pointercancel', () => { gesture = null; });
-screen.addEventListener('lostpointercapture', () => { gesture = null; });
+function cancelGesture(event) {
+  if (gesture && gesture.pointerId === event.pointerId) gesture = null;
+}
+
+screen.addEventListener('pointercancel', cancelGesture);
+screen.addEventListener('lostpointercapture', cancelGesture);
 
 $('textForm').addEventListener('submit', async (event) => {
   event.preventDefault();
