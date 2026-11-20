@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from importlib.util import module_from_spec, spec_from_file_location
@@ -63,6 +64,20 @@ class PairingTest(unittest.TestCase):
         capture = events[0]
         self.assertFalse(Path(capture['path']).parent.exists())
         bridge.resolve({'capture': capture['id'], 'error': None})
+        self.assertIsNone(bridge.pending)
+
+    def test_input_timeout_does_not_retry_or_dispatch_another_input(self):
+        module = load_server()
+        events = []
+        bridge = module.AppInput(events.append)
+        self.addCleanup(bridge.stop)
+        with patch.object(module, 'INPUT_SECONDS', 0):
+            with self.assertRaisesRegex(RuntimeError, module.INPUT_TIMEOUT):
+                bridge.perform(['click', '1', '2'])
+            with self.assertRaisesRegex(RuntimeError, '처리 중'):
+                bridge.perform(['key', 'enter'])
+        self.assertEqual(len(events), 1)
+        bridge.resolve({'input': events[0]['id'], 'error': None})
         self.assertIsNone(bridge.pending)
 
     def exercise_launcher(self, root, exercise, *options):
@@ -153,6 +168,8 @@ class PairingTest(unittest.TestCase):
 
     def exercise_app_capture(self, process, events, code):
         self.assertEqual(self.request('GET', '/api/screen')[0], 401)
+        click = {'type': 'click', 'x': 12.2, 'y': 13}
+        self.assertEqual(self.request('POST', '/api/action', click)[0], 401)
         status, headers, _ = self.request('POST', '/api/login', {'code': code})
         self.assertEqual(status, 200)
         self.assertEqual(events.get(timeout=5), {'event': 'paired'})
@@ -188,6 +205,23 @@ class PairingTest(unittest.TestCase):
             reply({'capture': capture['id'], 'error': '화면 보기 권한을 허용해줘.'})
             status, _, body = response.result(timeout=5)
             self.assertEqual((status, json.loads(body)['error']), (503, '화면 보기 권한을 허용해줘.'))
+
+            self.assertEqual(self.request('POST', '/api/action', {'type': 'type', 'text': '\ud800'}, cookie)[0], 400)
+            response = worker.submit(self.request, 'POST', '/api/action', click, cookie)
+            operation = events.get(timeout=5)
+            self.assertEqual(operation['event'], 'input')
+            self.assertEqual(operation['args'], ['click', '12', '13'])
+            self.assertGreater(operation['expiresAt'], time.time())
+            self.assertEqual(self.request('POST', '/api/action', click, cookie)[0], 503)
+            reply({'input': 'different-id', 'error': None})
+            reply({'input': operation['id'], 'error': None})
+            self.assertEqual(response.result(timeout=5)[0], 200)
+
+            response = worker.submit(self.request, 'POST', '/api/action', click, cookie)
+            operation = events.get(timeout=5)
+            reply({'input': operation['id'], 'error': '클릭·입력 권한을 허용해줘.'})
+            status, _, body = response.result(timeout=5)
+            self.assertEqual((status, json.loads(body)['error']), (503, '클릭·입력 권한을 허용해줘.'))
 
     def request(self, method, path, body=None, cookie=None, origin=True):
         headers = {}
