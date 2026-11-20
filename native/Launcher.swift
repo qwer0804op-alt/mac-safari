@@ -311,6 +311,8 @@ final class Launcher: NSObject, NSApplicationDelegate {
         let id: String?
         let reason: String?
         let path: String?
+        let args: [String]?
+        let expiresAt: Double?
     }
 
     private func readServerOutput(_ data: Data) {
@@ -320,6 +322,8 @@ final class Launcher: NSObject, NSApplicationDelegate {
             serverOutput.removeSubrange(...newline)
             guard let event = try? JSONDecoder().decode(ServerEvent.self, from: Data(line)) else { continue }
             switch event.event {
+            case "input":
+                handleInput(event)
             case "capture":
                 if let id = event.id, let path = event.path {
                     captureForServer(id: id, path: path)
@@ -479,8 +483,30 @@ final class Launcher: NSObject, NSApplicationDelegate {
 
     private func updatePermissions() {
         let screen = CGPreflightScreenCaptureAccess() ? "허용됨" : "허용 필요"
-        let control = AXIsProcessTrusted() ? "허용됨" : "허용 필요"
+        let control = hasRemoteInputPermission() ? "허용됨" : "허용 필요"
         permissions.stringValue = "화면 기록 \(screen) · 손쉬운 사용 \(control)"
+    }
+
+    private func replyToServer(_ operation: String, id: String, error: String?) {
+        let response: [String: Any] = [operation: id, "error": error as Any? ?? NSNull()]
+        if let data = try? JSONSerialization.data(withJSONObject: response) {
+            try? sendCommand(String(decoding: data, as: UTF8.self))
+        }
+    }
+
+    private func handleInput(_ event: ServerEvent) {
+        guard let id = event.id, UUID(uuidString: id) != nil else { return }
+        guard let args = event.args, let expiresAt = event.expiresAt,
+              Date().timeIntervalSince1970 < expiresAt else {
+            replyToServer("input", id: id, error: "입력 요청이 만료됐어. 다시 눌러.")
+            return
+        }
+        do {
+            try performRemoteInput(args)
+            replyToServer("input", id: id, error: nil)
+        } catch {
+            replyToServer("input", id: id, error: error.localizedDescription)
+        }
     }
 
     private func captureForServer(id: String, path: String) {
@@ -490,10 +516,7 @@ final class Launcher: NSObject, NSApplicationDelegate {
         let temp = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
         let reply: (String?) -> Void = { [weak self] error in
             guard let self, self.server === process, !self.restartAfterStop else { return }
-            let response: [String: Any] = ["capture": id, "error": error as Any? ?? NSNull()]
-            if let data = try? JSONSerialization.data(withJSONObject: response) {
-                try? self.sendCommand(String(decoding: data, as: UTF8.self))
-            }
+            self.replyToServer("capture", id: id, error: error)
         }
         guard file.lastPathComponent == "screen.jpg",
               directory.lastPathComponent.hasPrefix("macremote-screen-"),
@@ -550,10 +573,10 @@ final class Launcher: NSObject, NSApplicationDelegate {
     }
 
     @objc private func allowAccessibility() {
-        let prompt = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
-        if !AXIsProcessTrustedWithOptions(prompt as CFDictionary) {
-            openPrivacySettings("Privacy_Accessibility")
+        if !hasRemoteInputPermission() {
+            _ = requestRemoteInputPermission()
         }
+        openPrivacySettings("Privacy_Accessibility")
         updatePermissions()
     }
 
