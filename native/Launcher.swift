@@ -14,6 +14,7 @@ final class Launcher: NSObject, NSApplicationDelegate {
     private let pairingCode = NSTextField(labelWithString: "····")
     private let pairingNote = NSTextField(wrappingLabelWithString: "4자리 코드를 준비하는 중이야…")
     private let permissions = NSTextField(wrappingLabelWithString: "")
+    private let checkButton = NSButton(title: "화면 확인", target: nil, action: nil)
     private let copyButton = NSButton(title: "주소 복사", target: nil, action: nil)
     private let renewButton = NSButton(title: "새 코드", target: nil, action: nil)
     private let certificateButton = NSButton(title: "Safari 보안 설정…", target: nil, action: nil)
@@ -32,6 +33,7 @@ final class Launcher: NSObject, NSApplicationDelegate {
     private var restartAfterStop = false
     private var approvalID: String?
     private var approvalAlert: NSAlert?
+    private var capturing = false
 
     static func main() {
         let app = NSApplication.shared
@@ -100,9 +102,12 @@ final class Launcher: NSObject, NSApplicationDelegate {
 
         let addressRow = NSStackView(views: [address, copyButton])
         let pairingRow = NSStackView(views: [pairingCode, renewButton])
+        checkButton.target = self
+        checkButton.action = #selector(checkScreen)
         let permissionsRow = NSStackView(views: [
             NSButton(title: "화면 보기 권한", target: self, action: #selector(allowScreenCapture)),
-            NSButton(title: "클릭·입력 권한", target: self, action: #selector(allowAccessibility))
+            NSButton(title: "클릭·입력 권한", target: self, action: #selector(allowAccessibility)),
+            checkButton
         ])
         let helpRow = NSStackView(views: [certificateButton, startButton])
         [addressRow, pairingRow, permissionsRow, helpRow].forEach {
@@ -251,7 +256,10 @@ final class Launcher: NSObject, NSApplicationDelegate {
             let errors = Pipe()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
             let modeArguments = mode == .internet ? ["--internet"] : []
-            process.arguments = ["-B", script.path, "--runtime", support.path] + modeArguments
+            process.arguments = ["-B", script.path, "--runtime", support.path, "--app-capture"] + modeArguments
+            var environment = ProcessInfo.processInfo.environment
+            environment["TMPDIR"] = FileManager.default.temporaryDirectory.path
+            process.environment = environment
             process.standardInput = toServer
             process.standardOutput = fromServer
             process.standardError = errors
@@ -302,6 +310,7 @@ final class Launcher: NSObject, NSApplicationDelegate {
         let profile: String?
         let id: String?
         let reason: String?
+        let path: String?
     }
 
     private func readServerOutput(_ data: Data) {
@@ -311,6 +320,10 @@ final class Launcher: NSObject, NSApplicationDelegate {
             serverOutput.removeSubrange(...newline)
             guard let event = try? JSONDecoder().decode(ServerEvent.self, from: Data(line)) else { continue }
             switch event.event {
+            case "capture":
+                if let id = event.id, let path = event.path {
+                    captureForServer(id: id, path: path)
+                }
             case "ready":
                 connectURL = event.urls?.first
                 if mode == .internet {
@@ -470,11 +483,69 @@ final class Launcher: NSObject, NSApplicationDelegate {
         permissions.stringValue = "화면 기록 \(screen) · 손쉬운 사용 \(control)"
     }
 
+    private func captureForServer(id: String, path: String) {
+        guard UUID(uuidString: id) != nil, let process = server else { return }
+        let file = URL(fileURLWithPath: path).resolvingSymlinksInPath()
+        let directory = file.deletingLastPathComponent()
+        let temp = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
+        let reply: (String?) -> Void = { [weak self] error in
+            guard let self, self.server === process, !self.restartAfterStop else { return }
+            let response: [String: Any] = ["capture": id, "error": error as Any? ?? NSNull()]
+            if let data = try? JSONSerialization.data(withJSONObject: response) {
+                try? self.sendCommand(String(decoding: data, as: UTF8.self))
+            }
+        }
+        guard file.lastPathComponent == "screen.jpg",
+              directory.lastPathComponent.hasPrefix("macremote-screen-"),
+              directory.deletingLastPathComponent().path == temp.path else {
+            reply("화면 파일을 준비할 수 없어. Mac 리모컨을 다시 열어.")
+            return
+        }
+        capture(to: file, completion: reply)
+    }
+
+    private func capture(to file: URL, completion: @escaping (String?) -> Void) {
+        guard !capturing else {
+            completion("이전 화면을 가져오는 중이야. 잠시 뒤 다시 시도해.")
+            return
+        }
+        capturing = true
+        Task { @MainActor in
+            var failure: String?
+            do {
+                try await captureScreen(to: file)
+            } catch {
+                failure = error.localizedDescription
+            }
+            capturing = false
+            completion(failure)
+        }
+    }
+
+    @objc private func checkScreen() {
+        let manager = FileManager.default
+        let directory = manager.temporaryDirectory.appendingPathComponent("macremote-check-" + UUID().uuidString)
+        do {
+            try manager.createDirectory(at: directory, withIntermediateDirectories: false,
+                                        attributes: [.posixPermissions: 0o700])
+        } catch {
+            permissions.stringValue = "화면을 확인할 임시 폴더를 만들 수 없어."
+            return
+        }
+        checkButton.isEnabled = false
+        permissions.stringValue = "Mac 화면을 가져오는 중이야…"
+        capture(to: directory.appendingPathComponent("screen.jpg")) { [weak self] error in
+            try? manager.removeItem(at: directory)
+            self?.checkButton.isEnabled = true
+            self?.permissions.stringValue = error ?? "이 Mac의 화면을 캡처했어."
+        }
+    }
+
     @objc private func allowScreenCapture() {
         if !CGPreflightScreenCaptureAccess() {
             _ = CGRequestScreenCaptureAccess()
-            openPrivacySettings("Privacy_ScreenCapture")
         }
+        openPrivacySettings("Privacy_ScreenCapture")
         updatePermissions()
     }
 
