@@ -1,6 +1,6 @@
 # Mac 리모컨
 
-Safari에서 Mac의 주 화면을 보고, 탭으로 클릭하고, 스크롤과 텍스트를 보낼 수 있어. **인터넷 연결**을 켜면 다른 Wi-Fi나 셀룰러에서도 접속할 수 있어. Mac에는 macOS 14 이상과 Apple Command Line Tools가 필요해.
+Safari에서 Mac(또는 Windows PC)의 주 화면을 보고, 탭으로 클릭하고, 스크롤과 텍스트를 보낼 수 있어. **인터넷 연결**을 켜면 다른 Wi-Fi나 셀룰러에서도 접속할 수 있어. Mac에는 macOS 14 이상과 Apple Command Line Tools가 필요해.
 
 ## 맥에서 시작하기
 
@@ -30,6 +30,17 @@ Mac 앱 창을 닫으면 서버와 기존 연결이 종료돼. Mac의 Wi-Fi 주�
 ## Mac Safari에서 연결하기
 
 Mac 앱에서 **Safari 보안 설정 → Mac 인증서 보기**를 눌러. 표시된 공개 인증서를 키체인 접근의 로그인 키체인에 추가해. **Mac Remote Pairing CA**를 열고 **신뢰 → SSL**을 설정한 뒤 앱에 표시된 HTTPS 주소를 열어. [Apple 키체인 인증서 신뢰 설정 안내](https://support.apple.com/ko-kr/guide/keychain-access/kyca11871/mac)
+
+## Windows PC에서 사용하기
+
+Windows 10 이상, [Python 3](https://www.python.org/downloads/)(설치할 때 **Add python.exe to PATH** 선택), OpenSSL이 필요합니다. [Git for Windows](https://git-scm.com/download/win)에 OpenSSL이 들어 있어 따로 설치하지 않아도 됩니다. 다른 OpenSSL을 쓰려면 환경 변수 `MACREMOTE_OPENSSL`에 `openssl.exe` 경로를 지정해 주세요.
+
+1. 이 폴더에서 **start-windows.bat**을 실행해 주세요. 인터넷에서 연결하려면 명령 프롬프트에서 `start-windows.bat --internet`을 실행하고, 먼저 `winget install Cloudflare.cloudflared`로 cloudflared를 설치해 주세요.
+2. 창에 표시된 **접속 주소**를 휴대폰 브라우저에서 열고 **4자리 코드**를 입력해 주세요. 같은 Wi-Fi에서 연결할 때는 Windows 방화벽 허용 창이 나오면 **개인 네트워크**를 허용해 주세요.
+3. 같은 Wi-Fi에서 처음 연결할 때는 창에 표시된 인증서 파일을 휴대폰에 설치해야 합니다. 아이폰은 표시된 프로파일을 설치한 뒤 **인증서 신뢰 설정**을 켜 주세요. Android는 **설정 → 보안 → 암호화 및 사용자 인증 정보 → 인증서 설치 → CA 인증서**에서 인증서 파일을 선택해 주세요. 인터넷 연결은 인증서 설치가 필요 없습니다.
+4. 인터넷 연결에서는 휴대폰에서 코드를 입력하면 Windows 창에 승인 요청이 표시됩니다. 직접 요청한 연결이면 `y`를 입력해 주세요. `c`는 새 코드, `n`은 거절, `q`는 종료입니다.
+
+화면은 주 모니터만 전송합니다. 관리자 권한으로 실행한 프로그램, 잠금 화면, UAC 보안 데스크톱에는 입력할 수 없습니다. `pip install pillow`를 하면 화면 전송이 더 빨라집니다. 이 앱을 종료하면 공개 주소와 연결이 모두 닫힙니다.
 
 ## 테스트
 

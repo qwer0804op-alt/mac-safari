@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import queue
 import re
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -14,6 +15,16 @@ QUICK_URL = re.compile(r'https://[a-z0-9-]+\.trycloudflare\.com(?=[\s|]|$)')
 
 
 def cloudflared_path():
+    if os.name == 'nt':
+        candidates = [shutil.which('cloudflared')]
+        for variable in ('ProgramFiles', 'ProgramFiles(x86)', 'LOCALAPPDATA'):
+            base = os.environ.get(variable)
+            if base:
+                candidates += [str(Path(base) / 'cloudflared' / 'cloudflared.exe'), str(Path(base) / 'Microsoft' / 'WinGet' / 'Links' / 'cloudflared.exe')]
+        for path in candidates:
+            if path and Path(path).is_file():
+                return path
+        raise RuntimeError('인터넷 연결에 cloudflared가 필요합니다. 명령 프롬프트에서 winget install Cloudflare.cloudflared로 설치해 주세요.')
     for path in ('/opt/homebrew/bin/cloudflared', '/usr/local/bin/cloudflared', '/opt/local/bin/cloudflared'):
         if Path(path).is_file() and os.access(path, os.X_OK):
             return path
@@ -22,10 +33,11 @@ def cloudflared_path():
 
 @contextmanager
 def quick_tunnel(port, ca_pem, stopped):
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yml') as config:
-        config.write('{}\n')
-        config.flush()
-        with _run_quick_tunnel(port, ca_pem, stopped, config.name) as tunnel:
+    # A closed file in a temporary directory can be read by cloudflared on Windows too.
+    with tempfile.TemporaryDirectory(prefix='macremote-tunnel-') as directory:
+        config = Path(directory) / 'config.yml'
+        config.write_text('{}\n', encoding='ascii')
+        with _run_quick_tunnel(port, ca_pem, stopped, str(config)) as tunnel:
             yield tunnel
 
 
@@ -38,7 +50,7 @@ def _run_quick_tunnel(port, ca_pem, stopped, config):
             '--origin-ca-pool', str(ca_pem), '--origin-server-name', '127.0.0.1',
         ],
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, encoding='utf-8', errors='replace',
+        text=True, encoding='utf-8', errors='replace', creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
     ) as process:
         signals = queue.SimpleQueue()
 

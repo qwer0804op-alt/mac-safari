@@ -22,7 +22,12 @@ from internet_tunnel import quick_tunnel
 
 ROOT = Path(__file__).resolve().parent
 PUBLIC = ROOT / 'public'
-HELPER = ROOT / 'native' / 'remote-helper'
+if sys.platform == 'win32':
+    HELPER = ROOT / 'windows_helper.py'
+    HELPER_COMMAND = [sys.executable, '-I', str(HELPER)]
+else:
+    HELPER = ROOT / 'native' / 'remote-helper'
+    HELPER_COMMAND = [str(HELPER)]
 MAX_BODY = 16384
 SESSION_SECONDS = 12 * 60 * 60
 INTERNET_SESSION_SECONDS = 60 * 60
@@ -384,7 +389,8 @@ def valid_action(data):
 
 def run_helper(args, timeout=15):
     with helper_lock:
-        proc = subprocess.run([str(HELPER), *args], capture_output=True, text=True, timeout=timeout)
+        proc = subprocess.run([*HELPER_COMMAND, *args], capture_output=True, text=True, encoding='utf-8', errors='replace',
+                              timeout=timeout, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     if proc.returncode:
         raise RuntimeError((proc.stderr or 'Mac 제어에 실패했습니다.').strip()[:800])
 
@@ -468,7 +474,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(403, {'error': 'Mac 앱에 표시된 인터넷 주소로 접속해 주세요.'})
         path = urlsplit(self.path).path
         if path == '/api/status':
-            return self.send_json(200, {'authenticated': self.authenticated(), 'internet': self.server.state.internet})
+            return self.send_json(200, {'authenticated': self.authenticated(), 'internet': self.server.state.internet, 'platform': 'windows' if sys.platform == 'win32' else 'mac'})
         if path == '/api/screen':
             if not self.authenticated():
                 return self.send_json(401, {'error': '먼저 연결 코드를 입력해 주세요.'})
@@ -586,7 +592,7 @@ def main():
         parser.error('인터넷 연결 모드의 서버는 이 Mac 안에서만 열 수 있습니다.')
     host = '127.0.0.1' if args.internet else args.host or '0.0.0.0'
     if not args.app_capture and not HELPER.is_file():
-        raise SystemExit('Mac 제어 도구를 찾을 수 없습니다. 앱을 다시 빌드해 주세요.')
+        raise SystemExit('제어 도구를 찾을 수 없습니다. 앱을 다시 설치하거나 빌드해 주세요.')
     os.umask(0o077)
     ips = [] if host == '127.0.0.1' else local_addresses()
     certificates = CertificateStore(args.runtime.resolve())
