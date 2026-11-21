@@ -88,6 +88,7 @@ function pauseScreen(message, loading) {
 }
 
 function showLogin(message = '') {
+  setImmersive(false);
   if (session) session.abort();
   session = null;
   actionQueue = Promise.resolve();
@@ -100,6 +101,7 @@ function showLogin(message = '') {
   codeInput.value = '';
   codeInput.removeAttribute('aria-invalid');
   setStatus(false, '연결 안 됨');
+  codeInput.focus({ preventScroll: true });
 }
 
 function savedFps() {
@@ -168,6 +170,7 @@ async function checkStatus() {
       loginView.hidden = false;
       loginMessage.textContent = '';
       setStatus(false, '연결 안 됨');
+      codeInput.focus({ preventScroll: true });
     }
   } catch {
     if (statusRequest !== request) return;
@@ -184,6 +187,10 @@ async function checkStatus() {
 codeInput.addEventListener('input', () => {
   codeInput.removeAttribute('aria-invalid');
   if (!loginPending) loginMessage.textContent = '';
+  const digits = codeInput.value.replace(/[^0-9]/g, '');
+  if (digits !== codeInput.value) codeInput.value = digits;
+  // The fourth digit connects right away, so no extra tap is needed.
+  if (digits.length === 4 && !loginPending) $('loginForm').requestSubmit();
 });
 
 $('loginForm').addEventListener('submit', async (event) => {
@@ -508,6 +515,7 @@ screen.addEventListener('pointerup', (event) => {
       const x = Math.max(0, Math.min(lastImageSize.width - 1, Math.floor((event.clientX - rect.left) / rect.width * lastImageSize.width)));
       const y = Math.max(0, Math.min(lastImageSize.height - 1, Math.floor((event.clientY - rect.top) / rect.height * lastImageSize.height)));
       sendAction({ type: 'click', x, y });
+      showRipple(event);
       // Only a mouse focuses the hidden keyboard field, so phones keep their on-screen keyboard closed.
       if (event.pointerType === 'mouse') keyCatcher.focus({ preventScroll: true });
     }
@@ -542,6 +550,49 @@ async function flushWheel() {
     if (wheelTotal && !wheelTimer) wheelTimer = setTimeout(flushWheel, 50);
   }
 }
+
+function showRipple(event) {
+  const ripple = $('ripple');
+  const area = screen.parentElement.getBoundingClientRect();
+  ripple.style.left = `${event.clientX - area.left}px`;
+  ripple.style.top = `${event.clientY - area.top}px`;
+  ripple.classList.remove('go');
+  void ripple.offsetWidth;
+  ripple.classList.add('go');
+}
+
+function setImmersive(on) {
+  document.body.classList.toggle('immersive', on);
+  if (!on) {
+    document.body.classList.remove('tools-open');
+    $('toolsButton').setAttribute('aria-expanded', 'false');
+  }
+  const button = $('immersiveButton');
+  button.setAttribute('aria-pressed', String(on));
+  button.textContent = on ? '⤡' : '⛶';
+  button.setAttribute('aria-label', on ? '전체 화면 닫기' : '전체 화면');
+  button.title = button.getAttribute('aria-label');
+  if (on && !document.fullscreenElement && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
+  if (!on && document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+}
+
+$('immersiveButton').addEventListener('click', () => setImmersive(!document.body.classList.contains('immersive')));
+$('toolsButton').addEventListener('click', () => {
+  const open = document.body.classList.toggle('tools-open');
+  $('toolsButton').setAttribute('aria-expanded', String(open));
+});
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement && document.body.classList.contains('immersive')) setImmersive(false);
+});
+
+document.querySelectorAll('[data-tab]').forEach((tab) => tab.addEventListener('click', () => {
+  document.querySelectorAll('[data-tab]').forEach((other) => other.setAttribute('aria-selected', String(other === tab)));
+  document.querySelectorAll('.tab-panel').forEach((panel) => panel.classList.toggle('active', panel.id === tab.dataset.tab));
+}));
+
+$('inputHint').textContent = matchMedia('(pointer: coarse)').matches
+  ? '탭하면 클릭, 밀면 스크롤'
+  : '누른 뒤 키보드로 입력, 휠로 스크롤';
 
 function flushTyped() {
   const text = keyCatcher.value.replaceAll('\0', '');
