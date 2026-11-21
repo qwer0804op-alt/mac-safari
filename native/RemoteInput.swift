@@ -14,21 +14,21 @@ enum RemoteInputFailure: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidArguments:
-            return "입력 요청 형식이 올바르지 않아."
+            return "입력 요청 형식이 올바르지 않습니다."
         case .permissionRequired:
-            return "Mac 리모컨에서 클릭·입력 권한을 허용해."
+            return "Mac 리모컨에서 클릭·입력 권한을 허용해 주세요."
         case .invalidPoint:
-            return "Mac 화면에 있는 위치를 다시 눌러."
+            return "Mac 화면에 있는 위치를 다시 눌러 주세요."
         case .invalidScroll:
-            return "스크롤 값이 올바르지 않아."
+            return "스크롤 값이 올바르지 않습니다."
         case .unknownKey:
-            return "지원하지 않는 키야."
+            return "지원하지 않는 키입니다."
         case .invalidText:
-            return "보낼 텍스트의 길이를 확인해."
+            return "보낼 텍스트의 길이를 확인해 주세요."
         case .unsupportedCharacter:
-            return "지원하지 않는 글자가 있어."
+            return "지원하지 않는 글자가 있습니다."
         case .eventCreationFailed:
-            return "Mac에 입력을 보낼 수 없어. 다시 시도해."
+            return "Mac에 입력을 보낼 수 없습니다. 다시 시도해 주세요."
         }
     }
 }

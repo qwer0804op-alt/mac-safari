@@ -25,7 +25,7 @@ def run(*args):
     completed = subprocess.run([OPENSSL, *map(str, args)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
     if completed.returncode:
         detail = completed.stderr.decode('utf-8', 'replace').strip()[-1000:]
-        raise RuntimeError('인증서 처리에 실패했어. ' + detail)
+        raise RuntimeError('인증서 처리에 실패했습니다. ' + detail)
     return completed.stdout
 
 
@@ -79,7 +79,7 @@ class CertificateStore:
             'PayloadIdentifier': profile_id,
             'PayloadUUID': str(uuid5(NAMESPACE_URL, f'urn:{profile_id}')),
             'PayloadDisplayName': 'Mac 리모컨 Safari 인증서',
-            'PayloadDescription': 'Safari에서 Mac 리모컨에 HTTPS로 연결할 때 쓰는 인증서를 설치해.',
+            'PayloadDescription': 'Safari에서 Mac 리모컨에 HTTPS로 연결할 때 쓰는 인증서를 설치합니다.',
             'PayloadRemovalDisallowed': False,
             'PayloadContent': [{
                 'PayloadType': 'com.apple.security.root',
@@ -115,7 +115,7 @@ authorityKeyIdentifier = keyid:always
         key, pem = tmp / 'ca-key.pem', tmp / 'ca.pem'
         run('req', '-new', '-x509', '-newkey', 'rsa:2048', '-nodes', '-sha256', '-days', '3650', '-config', config, '-extensions', 'ca_ext', '-keyout', key, '-out', pem)
         if not matches_key(pem, key):
-            raise RuntimeError('CA 키가 인증서와 일치하지 않아.')
+            raise RuntimeError('CA 키가 인증서와 일치하지 않습니다.')
         atomic_install(key, self.ca_key, 0o600)
         atomic_install(pem, self.ca_pem, 0o600)
 
@@ -123,15 +123,15 @@ authorityKeyIdentifier = keyid:always
         if not any(path.exists() for path in (self.ca_key, self.ca_pem, self.public_cert)):
             self.create_ca(tmp)
         if not self.ca_key.is_file() or not self.ca_pem.is_file():
-            raise RuntimeError('기존 CA 인증서나 개인키를 찾을 수 없어.')
+            raise RuntimeError('기존 CA 인증서나 개인키를 찾을 수 없습니다.')
         os.chmod(self.ca_key, 0o600)
         if not matches_key(self.ca_pem, self.ca_key):
-            raise RuntimeError('기존 CA 인증서와 개인키가 일치하지 않아.')
+            raise RuntimeError('기존 CA 인증서와 개인키가 일치하지 않습니다.')
         # Preserve the CA identity that phones have already trusted.
         try:
             run('x509', '-in', self.ca_pem, '-checkend', str(366 * 86400), '-noout')
         except RuntimeError as exc:
-            raise RuntimeError('로컬 CA가 1년 이내 만료돼. 인증서를 갱신해야 해.') from exc
+            raise RuntimeError('로컬 CA가 1년 이내 만료됩니다. 인증서를 갱신해야 합니다.') from exc
         expected = run('x509', '-in', self.ca_pem, '-outform', 'DER')
         if not self.public_cert.is_file() or self.public_cert.read_bytes() != expected:
             ca_public = tmp / 'ca.cer'
@@ -166,7 +166,7 @@ DNS.1 = localhost
         actual = set(decoded.get('subjectAltName', ()))
         expected = {('DNS', 'localhost')} | {('IP Address', ip) for ip in ips}
         if actual != expected:
-            raise RuntimeError('인증서의 접속 주소가 현재 주소와 달라.')
+            raise RuntimeError('인증서의 접속 주소가 현재 주소와 다릅니다.')
         run('x509', '-in', cert, '-checkend', str(7 * 86400), '-noout')
         server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         server_context.minimum_version = ssl.TLSVersion.TLSv1_2
@@ -217,4 +217,4 @@ def verify_handshake(server_context, client_context, name):
         finally:
             thread.join(timeout=6)
         if thread.is_alive() or server_errors:
-            raise RuntimeError('인증서 TLS 자체 검사에 실패했어.')
+            raise RuntimeError('인증서 TLS 자체 검사에 실패했습니다.')

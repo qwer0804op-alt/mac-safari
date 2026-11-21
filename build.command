@@ -34,7 +34,7 @@ mkdir -p "${output:h}"
 if [[ -e "$output" ]]; then
   existing_id="$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$output/Contents/Info.plist")"
   if [[ "$existing_id" != 'local.macremote.pairing' ]]; then
-    print -u2 '같은 이름의 다른 앱이 설치되어 있어.'
+    print -u2 '같은 이름의 다른 앱이 설치되어 있습니다.'
     exit 1
   fi
   mv "$output" "$staging/previous.app"

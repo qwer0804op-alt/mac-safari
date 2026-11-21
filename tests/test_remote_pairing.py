@@ -42,6 +42,26 @@ class PairingTest(unittest.TestCase):
             clock.monotonic.return_value = 400
             self.assertEqual(state.pair('0027')[0], 410)
 
+    def test_internet_pairing_waits_for_matching_mac_decision(self):
+        module = load_server()
+        events = queue.Queue()
+        state = module.RemoteState(events.put, internet=True)
+        for allow in (False, True):
+            state.issue_code()
+            code = events.get()['code']
+            with ThreadPoolExecutor(max_workers=1) as workers:
+                response = workers.submit(state.pair, code)
+                approval = events.get(timeout=2)
+                self.assertEqual(approval['event'], 'approval')
+                state.resolve_approval('unrelated', True)
+                self.assertFalse(response.done())
+                state.resolve_approval(approval['id'], allow)
+                status, _, headers = response.result(timeout=2)
+                self.assertEqual(status, 200 if allow else 403)
+                self.assertEqual(bool(headers), allow)
+                self.assertEqual(state.pair(code)[0], 410)
+                events.get(timeout=2)
+
     def test_pairing_https_control_and_launcher_lifecycle(self):
         with tempfile.TemporaryDirectory() as name:
             self.exercise_launcher(Path(name).resolve(), self.exercise_pairing)

@@ -2,7 +2,7 @@
   "id": "/",
   "name": "Mac 리모컨",
   "short_name": "Mac 리모컨",
-  "description": "휴대폰에서 내 Mac을 직접 조작해.",
+  "description": "휴대폰에서 내 Mac을 직접 조작할 수 있습니다.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

@@ -13,13 +13,13 @@ private enum ScreenCaptureFailure: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .permissionDenied:
-            return "Mac 리모컨의 화면 보기 권한을 켠 뒤 앱을 완전히 닫았다가 다시 열어."
+            return "Mac 리모컨의 화면 보기 권한을 켠 뒤 앱을 완전히 닫았다가 다시 열어 주세요."
         case .displayUnavailable:
-            return "Mac의 주 화면을 찾을 수 없어. 화면이 켜져 있는지 확인해."
+            return "Mac의 주 화면을 찾을 수 없습니다. 화면이 켜져 있는지 확인해 주세요."
         case .captureFailed(let code):
-            return "Mac 화면을 캡처할 수 없어. Mac을 열어 둔 상태에서 다시 시도해. (오류 \(code))"
+            return "Mac 화면을 캡처할 수 없습니다. Mac을 열어 둔 상태에서 다시 시도해 주세요. (오류 \(code))"
         case .saveFailed:
-            return "Mac 화면 이미지를 저장할 수 없어. 다시 시도해."
+            return "Mac 화면 이미지를 저장할 수 없습니다. 다시 시도해 주세요."
         }
     }
 }

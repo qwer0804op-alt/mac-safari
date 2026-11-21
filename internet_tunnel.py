@@ -17,7 +17,7 @@ def cloudflared_path():
     for path in ('/opt/homebrew/bin/cloudflared', '/usr/local/bin/cloudflared', '/opt/local/bin/cloudflared'):
         if Path(path).is_file() and os.access(path, os.X_OK):
             return path
-    raise RuntimeError('인터넷 연결에 cloudflared가 필요해. Mac에서 brew install cloudflared로 설치해.')
+    raise RuntimeError('인터넷 연결에 cloudflared가 필요합니다. Mac에서 brew install cloudflared로 설치해 주세요.')
 
 
 @contextmanager
@@ -78,7 +78,7 @@ def _run_quick_tunnel(port, ca_pem, stopped, config):
             if stopped.is_set():
                 yield None, process
                 return
-            raise RuntimeError('인터넷 주소를 열지 못했어. Mac의 인터넷 연결을 확인하고 다시 시도해.')
+            raise RuntimeError('인터넷 주소를 열지 못했습니다. Mac의 인터넷 연결을 확인하고 다시 시도해 주세요.')
         finally:
             if process.poll() is None:
                 process.terminate()

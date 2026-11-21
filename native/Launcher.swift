@@ -9,10 +9,10 @@ final class Launcher: NSObject, NSApplicationDelegate {
     }
 
     private let modeControl = NSSegmentedControl(labels: ["같은 Wi-Fi", "인터넷"], trackingMode: .selectOne, target: nil, action: nil)
-    private let address = NSTextField(labelWithString: "접속 주소를 준비하는 중이야…")
-    private let addressNote = NSTextField(wrappingLabelWithString: "같은 Wi-Fi에 연결한 아이폰의 Safari에서 이 주소를 열어.")
+    private let address = NSTextField(labelWithString: "접속 주소를 준비하는 중입니다…")
+    private let addressNote = NSTextField(wrappingLabelWithString: "같은 Wi-Fi에 연결한 아이폰의 Safari에서 이 주소를 열어 주세요.")
     private let pairingCode = NSTextField(labelWithString: "····")
-    private let pairingNote = NSTextField(wrappingLabelWithString: "4자리 코드를 준비하는 중이야…")
+    private let pairingNote = NSTextField(wrappingLabelWithString: "4자리 코드를 준비하는 중입니다…")
     private let permissions = NSTextField(wrappingLabelWithString: "")
     private let checkButton = NSButton(title: "화면 확인", target: nil, action: nil)
     private let copyButton = NSButton(title: "주소 복사", target: nil, action: nil)
@@ -169,8 +169,8 @@ final class Launcher: NSObject, NSApplicationDelegate {
         modeControl.selectedSegment = mode.rawValue
         certificateButton.isHidden = mode == .internet
         connectionNote.stringValue = mode == .internet
-            ? "Cloudflare가 화면과 조작 요청을 중계해. 모드를 바꾸거나 앱을 닫으면 공개 주소와 연결이 끝나."
-            : "Safari에서 연결이 비공개로 설정되지 않았다고 나오면 보안 설정부터 해."
+            ? "Cloudflare가 화면과 조작 요청을 중계합니다. 모드를 바꾸거나 앱을 닫으면 공개 주소와 연결이 종료됩니다."
+            : "Safari에서 연결이 비공개 연결 경고가 표시되면 먼저 보안 설정을 확인해 주세요."
     }
 
     @objc private func selectMode() {
@@ -182,8 +182,8 @@ final class Launcher: NSObject, NSApplicationDelegate {
 
         modeControl.selectedSegment = mode.rawValue
         let notice = NSAlert()
-        notice.messageText = "인터넷에서 연결할까?"
-        notice.informativeText = "Cloudflare가 임시 공개 주소를 만들고 화면과 조작 요청을 중계해. 숫자 4자리를 맞힌 사람도 이 Mac에서 네가 승인해야 연결돼. 연결 방식을 바꾸면 기존 연결은 종료돼."
+        notice.messageText = "인터넷에서 연결하시겠습니까?"
+        notice.informativeText = "Cloudflare가 임시 공개 주소를 만들고 화면과 조작 요청을 중계합니다. 숫자 4자리를 맞힌 사람도 이 Mac에서 직접 승인해야 연결됩니다. 연결 방식을 바꾸면 기존 연결은 종료됩니다."
         notice.addButton(withTitle: "취소")
         notice.addButton(withTitle: "인터넷 주소 만들기")
         notice.beginSheetModal(for: window) { [weak self] reply in
@@ -205,9 +205,9 @@ final class Launcher: NSObject, NSApplicationDelegate {
         modeControl.isEnabled = false
         startButton.isHidden = true
         clearConnection()
-        address.stringValue = "기존 연결을 종료하는 중이야…"
-        addressNote.stringValue = "새 접속 주소를 준비할게."
-        setCodeMessage("새 코드를 준비하는 중이야…")
+        address.stringValue = "기존 연결을 종료하는 중입니다…"
+        addressNote.stringValue = "새 접속 주소를 준비하고 있습니다."
+        setCodeMessage("새 코드를 준비하는 중입니다…")
         do {
             try sendCommand("quit")
         } catch {
@@ -230,11 +230,11 @@ final class Launcher: NSObject, NSApplicationDelegate {
         guard server == nil else { return }
         startButton.isHidden = true
         clearConnection()
-        address.stringValue = "접속 주소를 준비하는 중이야…"
+        address.stringValue = "접속 주소를 준비하는 중입니다…"
         addressNote.stringValue = mode == .internet
-            ? "Cloudflare를 통해 공개 연결을 준비하고 있어."
-            : "같은 Wi-Fi에 연결한 아이폰의 Safari에서 이 주소를 열어."
-        setCodeMessage("4자리 코드를 준비하는 중이야…")
+            ? "Cloudflare를 통해 공개 연결을 준비하고 있습니다."
+            : "같은 Wi-Fi에 연결한 아이폰의 Safari에서 이 주소를 열어 주세요."
+        setCodeMessage("4자리 코드를 준비하는 중입니다…")
         serverOutput.removeAll()
         serverError = ""
 
@@ -243,11 +243,11 @@ final class Launcher: NSObject, NSApplicationDelegate {
                 for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
             ).appendingPathComponent("Mac Remote Pairing", isDirectory: true)
             guard let script = Bundle.main.url(forResource: "server", withExtension: "py") else {
-                showStartupError("앱에서 서버 파일을 찾을 수 없어.")
+                showStartupError("앱에서 서버 파일을 찾을 수 없습니다.")
                 return
             }
             guard FileManager.default.isExecutableFile(atPath: "/usr/bin/python3") else {
-                showStartupError("Mac에 Python 3가 필요해.")
+                showStartupError("Mac에 Python 3가 필요합니다.")
                 return
             }
             let process = Process()
@@ -331,13 +331,13 @@ final class Launcher: NSObject, NSApplicationDelegate {
             case "ready":
                 connectURL = event.urls?.first
                 if mode == .internet {
-                    address.stringValue = connectURL ?? "공개 주소를 가져올 수 없어."
-                    addressNote.stringValue = "아이폰 Safari에서 주소를 열고 코드를 입력하면 Mac에 승인 요청이 와."
+                    address.stringValue = connectURL ?? "공개 주소를 가져올 수 없습니다."
+                    addressNote.stringValue = "아이폰 Safari에서 주소를 열고 코드를 입력하면 Mac에 승인 요청이 표시됩니다."
                 } else {
-                    address.stringValue = connectURL ?? "Mac의 Wi-Fi 연결을 확인해줘."
+                    address.stringValue = connectURL ?? "Mac의 Wi-Fi 연결을 확인해 주세요."
                     addressNote.stringValue = connectURL == nil
-                        ? "네트워크에 연결한 뒤 앱을 닫았다 다시 열어."
-                        : "같은 Wi-Fi에 연결한 아이폰의 Safari에서 이 주소를 열어."
+                        ? "네트워크에 연결한 뒤 앱을 닫았다 다시 열어 주세요."
+                        : "같은 Wi-Fi에 연결한 아이폰의 Safari에서 이 주소를 열어 주세요."
                 }
                 copyButton.isEnabled = connectURL != nil
                 certificate = event.certificate.map { URL(fileURLWithPath: $0) }
@@ -350,16 +350,16 @@ final class Launcher: NSObject, NSApplicationDelegate {
             case "paired":
                 dismissApproval()
                 renewButton.isEnabled = true
-                setCodeMessage("아이폰을 연결했어. 다시 연결하려면 새 코드를 눌러.")
+                setCodeMessage("아이폰을 연결했습니다. 다시 연결하려면 새 코드를 눌러 주세요.")
             case "exhausted":
-                setCodeMessage("코드를 다섯 번 틀렸어. 새 코드를 눌러 다시 연결해.")
+                setCodeMessage("코드를 다섯 번 틀렸습니다. 새 코드를 눌러 다시 연결해 주세요.")
             case "approval":
                 if let id = event.id { askForApproval(id) }
             case "approval-ended":
                 if let id = event.id, id == approvalID {
                     dismissApproval()
                     renewButton.isEnabled = true
-                    setCodeMessage(event.reason == "denied" ? "연결을 거절했어. 새 코드를 눌러." : "승인 대기가 끝났어. 새 코드를 눌러.")
+                    setCodeMessage(event.reason == "denied" ? "연결을 거절했습니다. 새 코드를 눌러 주세요." : "승인 대기가 끝났습니다. 새 코드를 눌러 주세요.")
                 }
             default:
                 break
@@ -370,10 +370,10 @@ final class Launcher: NSObject, NSApplicationDelegate {
     private func showCode(_ code: String) {
         codeTimer?.invalidate()
         pairingCode.stringValue = code
-        pairingNote.stringValue = "5분 안에 한 번 쓸 수 있어."
+        pairingNote.stringValue = "5분 안에 한 번 쓸 수 있습니다."
         renewButton.isEnabled = true
         codeTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: false) { [weak self] _ in
-            self?.setCodeMessage("코드가 만료됐어. 새 코드를 눌러.")
+            self?.setCodeMessage("코드가 만료됐습니다. 새 코드를 눌러 주세요.")
         }
     }
 
@@ -389,11 +389,11 @@ final class Launcher: NSObject, NSApplicationDelegate {
 
         approvalID = id
         renewButton.isEnabled = false
-        setCodeMessage("이 Mac에서 연결 승인을 기다리고 있어.")
+        setCodeMessage("이 Mac에서 연결 승인을 기다리고 있습니다.")
 
         let alert = NSAlert()
-        alert.messageText = "인터넷 원격 제어를 허용할까?"
-        alert.informativeText = "누군가 올바른 페어링 코드를 입력했어. 네가 방금 연결한 기기가 맞으면 허용해. 허용하면 그 기기에서 Mac 화면을 보고 클릭과 입력을 보낼 수 있어."
+        alert.messageText = "인터넷 원격 제어를 허용하시겠습니까?"
+        alert.informativeText = "누군가 올바른 페어링 코드를 입력했습니다. 방금 연결하신 기기가 맞으면 허용해 주세요. 허용하면 그 기기에서 Mac 화면을 보고 클릭과 입력을 보낼 수 있습니다."
         let denyButton = alert.addButton(withTitle: "거절")
         denyButton.keyEquivalent = "\u{1b}"
         alert.addButton(withTitle: "연결 허용").keyEquivalent = ""
@@ -408,7 +408,7 @@ final class Launcher: NSObject, NSApplicationDelegate {
             } catch {
                 self.dismissApproval()
                 self.renewButton.isEnabled = true
-                self.setCodeMessage("응답을 보내지 못했어. 새 코드를 눌러 다시 연결해.")
+                self.setCodeMessage("응답을 보내지 못했습니다. 새 코드를 눌러 다시 연결해 주세요.")
             }
         }
     }
@@ -425,15 +425,15 @@ final class Launcher: NSObject, NSApplicationDelegate {
     private func showStartupError(_ detail: String) {
         clearConnection()
         if mode == .internet {
-            address.stringValue = "공개 접속 주소를 만들 수 없어."
-            addressNote.stringValue = detail.isEmpty ? "cloudflared와 인터넷 연결을 확인한 뒤 다시 시작을 눌러." : detail
+            address.stringValue = "공개 접속 주소를 만들 수 없습니다."
+            addressNote.stringValue = detail.isEmpty ? "cloudflared와 인터넷 연결을 확인한 뒤 다시 시작을 눌러 주세요." : detail
         } else {
-            address.stringValue = "접속 서버를 시작할 수 없어."
-            addressNote.stringValue = "다시 시작을 눌러."
+            address.stringValue = "접속 서버를 시작할 수 없습니다."
+            addressNote.stringValue = "다시 시작을 눌러 주세요."
         }
         addressNote.toolTip = detail.isEmpty ? nil : detail
         startButton.isHidden = false
-        setCodeMessage("서버가 켜지면 페어링 코드가 나와.")
+        setCodeMessage("서버가 켜지면 페어링 코드가 표시됩니다.")
     }
 
     @objc private func copyAddress() {
@@ -446,7 +446,7 @@ final class Launcher: NSObject, NSApplicationDelegate {
         do {
             try sendCommand("pair")
         } catch {
-            setCodeMessage("앱을 닫았다 다시 열어.")
+            setCodeMessage("앱을 닫았다 다시 열어 주세요.")
         }
     }
 
@@ -460,11 +460,11 @@ final class Launcher: NSObject, NSApplicationDelegate {
         let setup = NSAlert()
         setup.messageText = "Safari에서 안전하게 연결하기"
         setup.informativeText = """
-        아이폰에서는 이 앱이 만든 프로파일을 AirDrop으로 받아. 설정 → 일반 → VPN 및 기기 관리에서 설치한 뒤, 일반 → 정보 → 인증서 신뢰 설정에서 Mac Remote Pairing CA의 전체 신뢰를 켜.
+        아이폰에서는 이 앱이 만든 프로파일을 AirDrop으로 받아 주세요. 설정 → 일반 → VPN 및 기기 관리에서 설치한 뒤, 일반 → 정보 → 인증서 신뢰 설정에서 Mac Remote Pairing CA의 전체 신뢰를 켜 주세요.
 
-        맥 Safari에서는 인증서를 키체인 접근에 추가하고 인증서의 SSL 신뢰를 켜.
+        맥 Safari에서는 인증서를 키체인 접근에 추가하고 인증서의 SSL 신뢰를 켜 주세요.
 
-        설정이 끝나면 이 앱에 표시된 HTTPS 주소를 열어.
+        설정이 끝나면 이 앱에 표시된 HTTPS 주소를 열어 주세요.
         """
         setup.addButton(withTitle: "아이폰 프로파일 보기")
         setup.addButton(withTitle: "Mac 인증서 보기")
@@ -498,7 +498,7 @@ final class Launcher: NSObject, NSApplicationDelegate {
         guard let id = event.id, UUID(uuidString: id) != nil else { return }
         guard let args = event.args, let expiresAt = event.expiresAt,
               Date().timeIntervalSince1970 < expiresAt else {
-            replyToServer("input", id: id, error: "입력 요청이 만료됐어. 다시 눌러.")
+            replyToServer("input", id: id, error: "입력 요청이 만료됐습니다. 다시 눌러 주세요.")
             return
         }
         do {
@@ -521,7 +521,7 @@ final class Launcher: NSObject, NSApplicationDelegate {
         guard file.lastPathComponent == "screen.jpg",
               directory.lastPathComponent.hasPrefix("macremote-screen-"),
               directory.deletingLastPathComponent().path == temp.path else {
-            reply("화면 파일을 준비할 수 없어. Mac 리모컨을 다시 열어.")
+            reply("화면 파일을 준비할 수 없습니다. Mac 리모컨을 다시 열어 주세요.")
             return
         }
         capture(to: file, completion: reply)
@@ -529,7 +529,7 @@ final class Launcher: NSObject, NSApplicationDelegate {
 
     private func capture(to file: URL, completion: @escaping (String?) -> Void) {
         guard !capturing else {
-            completion("이전 화면을 가져오는 중이야. 잠시 뒤 다시 시도해.")
+            completion("이전 화면을 가져오는 중입니다. 잠시 뒤 다시 시도해 주세요.")
             return
         }
         capturing = true
@@ -552,15 +552,15 @@ final class Launcher: NSObject, NSApplicationDelegate {
             try manager.createDirectory(at: directory, withIntermediateDirectories: false,
                                         attributes: [.posixPermissions: 0o700])
         } catch {
-            permissions.stringValue = "화면을 확인할 임시 폴더를 만들 수 없어."
+            permissions.stringValue = "화면을 확인할 임시 폴더를 만들 수 없습니다."
             return
         }
         checkButton.isEnabled = false
-        permissions.stringValue = "Mac 화면을 가져오는 중이야…"
+        permissions.stringValue = "Mac 화면을 가져오는 중입니다…"
         capture(to: directory.appendingPathComponent("screen.jpg")) { [weak self] error in
             try? manager.removeItem(at: directory)
             self?.checkButton.isEnabled = true
-            self?.permissions.stringValue = error ?? "이 Mac의 화면을 캡처했어."
+            self?.permissions.stringValue = error ?? "이 Mac의 화면을 캡처했습니다."
         }
     }
 

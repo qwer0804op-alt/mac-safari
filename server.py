@@ -30,11 +30,11 @@ PAIR_SECONDS = 5 * 60
 PAIR_ATTEMPTS = 5
 APPROVAL_SECONDS = 50
 CAPTURE_SECONDS = 8
-CAPTURE_TIMEOUT = 'Mac에서 화면을 가져오는 데 시간이 너무 오래 걸렸어.'
-CAPTURE_STOPPED = 'Mac에서 화면 공유를 종료했어.'
+CAPTURE_TIMEOUT = 'Mac에서 화면을 가져오는 데 시간이 너무 오래 걸렸습니다.'
+CAPTURE_STOPPED = 'Mac에서 화면 공유를 종료했습니다.'
 INPUT_SECONDS = 5
-INPUT_TIMEOUT = 'Mac이 입력 결과를 보내지 않았어. 다시 보내기 전에 Mac 화면을 확인해.'
-INPUT_STOPPED = 'Mac에서 원격 입력을 종료했어.'
+INPUT_TIMEOUT = 'Mac이 입력 결과를 보내지 않았습니다. 다시 보내기 전에 Mac 화면을 확인해 주세요.'
+INPUT_STOPPED = 'Mac에서 원격 입력을 종료했습니다.'
 helper_lock = threading.Lock()
 publish_lock = threading.Lock()
 
@@ -64,7 +64,7 @@ class CaptureRequest:
             self.directory.cleanup()
         except OSError:
             self.image = None
-            self.error = error or 'Mac에서 임시 화면 파일을 정리하지 못했어.'
+            self.error = error or 'Mac에서 임시 화면 파일을 정리하지 못했습니다.'
         finally:
             self.done.set()
 
@@ -115,13 +115,13 @@ class AppCapture:
             if time.monotonic() >= capture.deadline:
                 capture.finish(error=CAPTURE_TIMEOUT)
             elif error is not None:
-                capture.finish(error=error.strip()[:800] or 'Mac 화면을 가져오지 못했어.')
+                capture.finish(error=error.strip()[:800] or 'Mac 화면을 가져오지 못했습니다.')
             else:
                 try:
                     image = capture.path.read_bytes()
                 except OSError:
                     image = None
-                capture.finish(image=image, error=None if image else 'Mac 화면 파일을 읽지 못했어.')
+                capture.finish(image=image, error=None if image else 'Mac 화면 파일을 읽지 못했습니다.')
 
     def stop(self):
         with self.lock:
@@ -156,7 +156,7 @@ class AppInput:
             if self.stopped:
                 raise RuntimeError(INPUT_STOPPED)
             if self.pending is not None:
-                raise RuntimeError('Mac에서 다른 입력을 처리 중이야.')
+                raise RuntimeError('Mac에서 다른 입력을 처리 중입니다.')
             operation = InputRequest()
             try:
                 self.publish({'event': 'input', 'id': operation.id, 'args': args, 'expiresAt': operation.expires_at})
@@ -189,7 +189,7 @@ class AppInput:
                 operation.finish(INPUT_TIMEOUT)
             else:
                 if error is not None:
-                    error = error.strip()[:800] or 'Mac에 입력을 보내지 못했어.'
+                    error = error.strip()[:800] or 'Mac에 입력을 보내지 못했습니다.'
                 operation.finish(error)
 
     def stop(self):
@@ -223,20 +223,20 @@ class RemoteState:
 
     def pair(self, candidate):
         if not isinstance(candidate, str) or len(candidate) != 4 or not candidate.isascii() or not candidate.isdigit():
-            return 400, {'error': '숫자 4자리를 입력해.'}, ()
+            return 400, {'error': '숫자 4자리를 입력해 주세요.'}, ()
 
         with self.lock:
             now = time.monotonic()
             if now >= self.deadline:
-                return 410, {'error': '이 코드는 쓸 수 없어. Mac에서 새 코드를 만들어.'}, ()
+                return 410, {'error': '이 코드는 쓸 수 없습니다. Mac에서 새 코드를 만들어 주세요.'}, ()
             if self.attempts == 0:
-                return 429, {'error': '입력 횟수를 다 썼어. Mac에서 새 코드를 만들어.'}, ()
+                return 429, {'error': '입력 횟수를 다 썼습니다. Mac에서 새 코드를 만들어 주세요.'}, ()
             if not hmac.compare_digest(candidate, self.code):
                 self.attempts -= 1
                 if self.attempts > 0:
-                    return 401, {'error': '연결 코드가 틀렸어.'}, ()
+                    return 401, {'error': '연결 코드가 틀렸습니다.'}, ()
                 self.publish({'event': 'exhausted'})
-                return 429, {'error': '입력 횟수를 다 썼어. Mac에서 새 코드를 만들어.'}, ()
+                return 429, {'error': '입력 횟수를 다 썼습니다. Mac에서 새 코드를 만들어 주세요.'}, ()
             self.deadline = 0
             if not self.internet:
                 return self._pair_success(now)
@@ -268,12 +268,12 @@ class RemoteState:
             approval.done.set()
             return
         status, description = {
-            'denied': (403, 'Mac에서 연결을 거절했어.'),
-            'expired': (408, 'Mac에서 확인할 시간이 지났어.'),
-            'renewed': (403, 'Mac에서 새 코드를 만들었어.'),
-            'shutdown': (403, 'Mac에서 연결을 종료했어.'),
+            'denied': (403, 'Mac에서 연결을 거절했습니다.'),
+            'expired': (408, 'Mac에서 확인할 시간이 지났습니다.'),
+            'renewed': (403, 'Mac에서 새 코드를 만들었습니다.'),
+            'shutdown': (403, 'Mac에서 연결을 종료했습니다.'),
         }[reason]
-        approval.response = status, {'error': f'{description} 새 코드로 다시 연결해.'}, ()
+        approval.response = status, {'error': f'{description} 새 코드로 다시 연결해 주세요.'}, ()
         approval.done.set()
         self.publish({'event': 'approval-ended', 'id': approval.id, 'reason': reason})
 
@@ -357,36 +357,36 @@ def valid_action(data):
     if kind == 'click':
         x, y = data.get('x'), data.get('y')
         if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 <= v <= 30000 for v in (x, y)):
-            raise ValueError('좌표가 올바르지 않아.')
+            raise ValueError('좌표가 올바르지 않습니다.')
         return ['click', str(round(x)), str(round(y))]
     if kind == 'scroll':
         dy = data.get('dy')
         if isinstance(dy, bool) or not isinstance(dy, (int, float)) or not -1000 <= dy <= 1000:
-            raise ValueError('스크롤 값이 올바르지 않아.')
+            raise ValueError('스크롤 값이 올바르지 않습니다.')
         return ['scroll', str(round(dy))]
     if kind == 'key':
         key = data.get('key')
         keys = {'enter', 'tab', 'escape', 'backspace', 'delete', 'up', 'down', 'left', 'right', 'home', 'end', 'pageup', 'pagedown', 'space'}
         if not isinstance(key, str) or (key not in keys and not (len(key) == 1 and key.isascii() and key.isalnum())):
-            raise ValueError('지원하지 않는 키야.')
+            raise ValueError('지원하지 않는 키입니다.')
         return ['key', key]
     if kind == 'type':
         value = data.get('text')
         if not isinstance(value, str) or not value or len(value) > 2000 or '\x00' in value:
-            raise ValueError('입력할 글자를 확인해줘.')
+            raise ValueError('입력할 글자를 확인해 주세요.')
         try:
             value.encode('utf-8')
         except UnicodeEncodeError:
-            raise ValueError('입력할 글자를 확인해줘.') from None
+            raise ValueError('입력할 글자를 확인해 주세요.') from None
         return ['type', value]
-    raise ValueError('지원하지 않는 동작이야.')
+    raise ValueError('지원하지 않는 동작입니다.')
 
 
 def run_helper(args, timeout=15):
     with helper_lock:
         proc = subprocess.run([str(HELPER), *args], capture_output=True, text=True, timeout=timeout)
     if proc.returncode:
-        raise RuntimeError((proc.stderr or 'Mac 제어에 실패했어.').strip()[:800])
+        raise RuntimeError((proc.stderr or 'Mac 제어에 실패했습니다.').strip()[:800])
 
 
 def capture_with_helper():
@@ -451,34 +451,34 @@ class Handler(BaseHTTPRequestHandler):
 
     def read_json(self):
         if not self.headers.get('Content-Type', '').lower().startswith('application/json'):
-            raise ValueError('JSON 요청이 필요해.')
+            raise ValueError('JSON 요청이 필요합니다.')
         try:
             length = int(self.headers.get('Content-Length', '0'))
         except ValueError:
-            raise ValueError('요청 크기가 올바르지 않아.')
+            raise ValueError('요청 크기가 올바르지 않습니다.')
         if length <= 0 or length > MAX_BODY:
-            raise ValueError('요청 크기가 올바르지 않아.')
+            raise ValueError('요청 크기가 올바르지 않습니다.')
         result = json.loads(self.rfile.read(length))
         if not isinstance(result, dict):
-            raise ValueError('요청 형식이 올바르지 않아.')
+            raise ValueError('요청 형식이 올바르지 않습니다.')
         return result
 
     def do_GET(self):
         if not self.valid_host():
-            return self.send_json(403, {'error': 'Mac 앱에 표시된 인터넷 주소로 접속해.'})
+            return self.send_json(403, {'error': 'Mac 앱에 표시된 인터넷 주소로 접속해 주세요.'})
         path = urlsplit(self.path).path
         if path == '/api/status':
             return self.send_json(200, {'authenticated': self.authenticated(), 'internet': self.server.state.internet})
         if path == '/api/screen':
             if not self.authenticated():
-                return self.send_json(401, {'error': '먼저 연결 코드를 입력해줘.'})
+                return self.send_json(401, {'error': '먼저 연결 코드를 입력해 주세요.'})
             try:
                 capture = self.server.app_capture
                 image = capture.read() if capture is not None else capture_with_helper()
             except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
                 return self.send_json(503, {'error': str(exc)[:800]})
             if not self.authenticated():
-                return self.send_json(401, {'error': '먼저 연결 코드를 입력해줘.'})
+                return self.send_json(401, {'error': '먼저 연결 코드를 입력해 주세요.'})
             return self.send_bytes(200, image, 'image/jpeg')
         files = {'/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css', '/manifest.webmanifest': 'manifest.webmanifest', '/service-worker.js': 'service-worker.js', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png', '/apple-touch-icon.png': 'apple-touch-icon.png'}
         if path in files:
@@ -490,20 +490,20 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_bytes(200, body, kind)
             except OSError:
                 pass
-        return self.send_json(404, {'error': '찾을 수 없어.'})
+        return self.send_json(404, {'error': '찾을 수 없습니다.'})
 
     def do_POST(self):
         if not self.valid_host() or not self.valid_origin():
-            return self.send_json(403, {'error': '요청 출처를 확인할 수 없어.'})
+            return self.send_json(403, {'error': '요청 출처를 확인할 수 없습니다.'})
         path = urlsplit(self.path).path
         try:
             data = self.read_json()
         except (ValueError, UnicodeError, TimeoutError):
-            return self.send_json(400, {'error': '요청 형식이 올바르지 않아.'})
+            return self.send_json(400, {'error': '요청 형식이 올바르지 않습니다.'})
         if path == '/api/login':
             return self.send_json(*self.server.state.pair(data.get('code')))
         if not self.authenticated():
-            return self.send_json(401, {'error': '먼저 연결 코드를 입력해줘.'})
+            return self.send_json(401, {'error': '먼저 연결 코드를 입력해 주세요.'})
         if path == '/api/logout':
             self.server.state.logout(self.session_token())
             return self.send_json(200, {'ok': True}, [('Set-Cookie', 'mac_remote=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0')])
@@ -519,7 +519,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(400, {'error': str(exc)})
             except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
                 return self.send_json(503, {'error': str(exc)[:800]})
-        return self.send_json(404, {'error': '찾을 수 없어.'})
+        return self.send_json(404, {'error': '찾을 수 없습니다.'})
 
 
 def read_commands(server, stopped):
@@ -571,7 +571,7 @@ def serve_internet(server, state, certificates, stopped, ready):
         threading.Thread(target=watch_tunnel, daemon=True).start()
         server.serve_forever(poll_interval=0.2)
         if not stopped.is_set():
-            raise RuntimeError('인터넷 연결이 끊겼어. 다시 시작을 눌러.')
+            raise RuntimeError('인터넷 연결이 끊겼습니다. 다시 시작을 눌러 주세요.')
 
 
 def main():
@@ -583,12 +583,12 @@ def main():
     parser.add_argument('--runtime', type=Path, required=True)
     args = parser.parse_args()
     if args.internet and args.host not in (None, '127.0.0.1'):
-        parser.error('인터넷 연결 모드의 서버는 이 Mac 안에서만 열 수 있어.')
+        parser.error('인터넷 연결 모드의 서버는 이 Mac 안에서만 열 수 있습니다.')
     host = '127.0.0.1' if args.internet else args.host or '0.0.0.0'
     if not args.app_capture and not HELPER.is_file():
-        raise SystemExit('Mac 제어 도구를 찾을 수 없어. 앱을 다시 빌드해.')
+        raise SystemExit('Mac 제어 도구를 찾을 수 없습니다. 앱을 다시 빌드해 주세요.')
     os.umask(0o077)
-    ips = local_addresses()
+    ips = [] if host == '127.0.0.1' else local_addresses()
     certificates = CertificateStore(args.runtime.resolve())
     context = certificates.prepare(ips)
     profile = certificates.export_safari_profile()
