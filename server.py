@@ -361,7 +361,7 @@ def valid_action(data):
         return ['click', str(round(x)), str(round(y))]
     if kind == 'scroll':
         dy = data.get('dy')
-        if isinstance(dy, bool) or not isinstance(dy, (int, float)) or not -1000 <= dy <= 1000:
+        if isinstance(dy, bool) or not isinstance(dy, (int, float)) or not -1000 <= dy <= 1000 or round(dy) == 0:
             raise ValueError('스크롤 값이 올바르지 않습니다.')
         return ['scroll', str(round(dy))]
     if kind == 'key':
@@ -498,7 +498,7 @@ class Handler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         try:
             data = self.read_json()
-        except (ValueError, UnicodeError, TimeoutError):
+        except (ValueError, UnicodeError, TimeoutError, RecursionError):
             return self.send_json(400, {'error': '요청 형식이 올바르지 않습니다.'})
         if path == '/api/login':
             return self.send_json(*self.server.state.pair(data.get('code')))
