@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 import time
+import webbrowser
 from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -18,6 +19,7 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 from certificates import CertificateStore, local_addresses
+from fixed_entry import PROOF_PATH, QUICK_HOST, FixedEntry, load_origin, normalize_origin
 from internet_tunnel import quick_tunnel
 
 ROOT = Path(__file__).resolve().parent
@@ -310,7 +312,8 @@ class RemoteState:
 
 
 class RemoteHTTPServer(ThreadingHTTPServer):
-    def __init__(self, address, context, state, app_capture=None, app_input=None):
+    def __init__(self, address, context, state, app_capture=None, app_input=None, fixed_entry=None):
+        self.fixed_entry = fixed_entry
         self.context = context
         self.state = state
         self.app_capture = app_capture
@@ -469,10 +472,26 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError('요청 형식이 올바르지 않습니다.')
         return result
 
+    def send_proof(self, nonce):
+        # The fixed entry site asks for a signature over a fresh nonce to prove who owns this address.
+        entry, host = self.server.fixed_entry, self.server.public_host
+        if not self.server.state.internet or not QUICK_HOST.fullmatch(host or '') or not entry.sign_slots.acquire(blocking=False):
+            return self.send_json(503, {})
+        try:
+            signature = entry.proof(host, nonce)
+        except (OSError, RuntimeError, subprocess.SubprocessError):
+            return self.send_json(503, {})
+        finally:
+            entry.sign_slots.release()
+        return self.send_json(200, {'signature': signature})
+
     def do_GET(self):
         if not self.valid_host():
             return self.send_json(403, {'error': 'Mac 앱에 표시된 인터넷 주소로 접속해 주세요.'})
         path = urlsplit(self.path).path
+        proof = PROOF_PATH.fullmatch(path)
+        if proof is not None and self.server.fixed_entry is not None:
+            return self.send_proof(proof[1])
         if path == '/api/status':
             return self.send_json(200, {'authenticated': self.authenticated(), 'internet': self.server.state.internet, 'platform': 'windows' if sys.platform == 'win32' else 'mac'})
         if path == '/api/screen':
@@ -568,13 +587,26 @@ def serve_internet(server, state, certificates, stopped, ready):
         if stopped.is_set():
             return
         server.public_host = urlsplit(address).hostname
+        entry = server.fixed_entry
 
         def watch_tunnel():
             tunnel.wait()
             server.shutdown()
 
-        state.issue_code('ready', urls=[address], **ready)
+        def announce_entry():
+            # Give serve_forever a moment so the site can verify this address right away.
+            time.sleep(0.3)
+            try:
+                url = entry.registration_url(server.public_host)
+                publish({'event': 'register', 'url': url, 'fingerprint': entry.fingerprint()})
+                webbrowser.open(url)
+            except (OSError, RuntimeError, subprocess.SubprocessError, webbrowser.Error) as exc:
+                publish({'event': 'register-failed', 'error': str(exc)[:300]})
+
+        state.issue_code('ready', urls=[entry.origin if entry else address], **ready)
         threading.Thread(target=watch_tunnel, daemon=True).start()
+        if entry is not None:
+            threading.Thread(target=announce_entry, daemon=True).start()
         server.serve_forever(poll_interval=0.2)
         if not stopped.is_set():
             raise RuntimeError('인터넷 연결이 끊겼습니다. 다시 시작을 눌러 주세요.')
@@ -585,6 +617,7 @@ def main():
     parser.add_argument('--port', type=int, default=8766)
     parser.add_argument('--host')
     parser.add_argument('--internet', action='store_true')
+    parser.add_argument('--fixed-entry', help='고정 HTTPS 사이트의 첫 화면 주소 (인터넷 연결 모드)')
     parser.add_argument('--app-capture', action='store_true')
     parser.add_argument('--runtime', type=Path, required=True)
     args = parser.parse_args()
@@ -594,6 +627,14 @@ def main():
     if not args.app_capture and not HELPER.is_file():
         raise SystemExit('제어 도구를 찾을 수 없습니다. 앱을 다시 설치하거나 빌드해 주세요.')
     os.umask(0o077)
+    fixed_entry = None
+    if args.internet:
+        origin = args.fixed_entry or load_origin(args.runtime)
+        if origin:
+            fixed_entry = FixedEntry(args.runtime.resolve(), normalize_origin(origin))
+            fixed_entry.ensure_key()
+    elif args.fixed_entry:
+        parser.error('고정 주소는 인터넷 연결 모드에서만 쓸 수 있습니다.')
     ips = [] if host == '127.0.0.1' else local_addresses()
     certificates = CertificateStore(args.runtime.resolve())
     context = certificates.prepare(ips)
@@ -601,7 +642,7 @@ def main():
     state = RemoteState(publish, internet=args.internet)
     app_capture = AppCapture(publish) if args.app_capture else None
     app_input = AppInput(publish) if args.app_capture else None
-    with RemoteHTTPServer((host, args.port), context, state, app_capture=app_capture, app_input=app_input) as server:
+    with RemoteHTTPServer((host, args.port), context, state, app_capture=app_capture, app_input=app_input, fixed_entry=fixed_entry) as server:
         bound_host, port = server.server_address
         ready = {'port': port, 'certificate': str(certificates.public_cert), 'profile': str(profile)}
         stopped = threading.Event()

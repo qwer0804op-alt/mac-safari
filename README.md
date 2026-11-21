@@ -28,6 +28,10 @@ Safari에서 Mac(또는 Windows PC)의 주 화면을 보고, 탭으로 클릭하
 
 Mac 앱이나 인터넷 연결을 종료하면 공개 주소는 닫혀. 다시 켜면 새 주소가 발급되고, Mac은 켜져 있어야 해. [Cloudflare Quick Tunnel 안내](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/)
 
+## 고정 주소로 접속하기
+
+인터넷 연결의 주소는 켤 때마다 바뀝니다. 고정 사이트를 한 번 연결해 두면 컴퓨터와 휴대폰 모두 같은 웹 주소로 접속할 수 있습니다. 설정 방법은 [fixed-entry/README.md](fixed-entry/README.md)를 참고해 주세요. Windows는 `start-windows.bat --fixed-entry https://고정-사이트-주소`, Mac은 `python3 fixed_entry.py configure https://고정-사이트-주소`를 한 번 실행하면 됩니다.
+
 ## 같은 Wi-Fi에서 연결하기
 
 1. 첫 연결 전에 Mac 앱에서 **Safari 보안 설정 → 아이폰 프로파일 보기**를 눌러. Finder에 표시되는 **Mac-Remote-Safari.mobileconfig**를 아이폰에 AirDrop해.

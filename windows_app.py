@@ -2,11 +2,12 @@
 """Console launcher for Mac Remote on Windows. Run it with start-windows.bat."""
 import argparse
 import json
-import os
 from pathlib import Path
 import subprocess
 import sys
 import threading
+
+import fixed_entry
 
 ROOT = Path(__file__).resolve().parent
 HELP = '명령: c = 새 코드, y = 연결 허용, n = 연결 거절, q = 종료'
@@ -35,6 +36,14 @@ class Console:
                     lines.append('아이폰용 프로파일: ' + str(event['profile']))
             lines.append(HELP)
             return lines
+        if kind == 'register':
+            lines = ['고정 주소에 이 PC를 등록하는 중입니다. 브라우저가 열리면 안내에 따라 주세요.',
+                     '브라우저가 열리지 않으면 아래 주소를 5분 안에 직접 열어 주세요.', str(event.get('url', ''))]
+            if event.get('fingerprint'):
+                lines.append('처음 등록할 때는 사이트에 기기 지문 ' + str(event['fingerprint']) + '을 입력해 주세요.')
+            return lines
+        if kind == 'register-failed':
+            return ['고정 주소 등록 창을 열지 못했습니다. c를 입력해 새 코드를 받거나 다시 시작해 주세요.']
         if kind == 'code':
             self.approval = None
             return ['새 4자리 코드: ' + str(event.get('code', ''))]
@@ -84,14 +93,14 @@ def pump(stream, console, out):
 
 
 def runtime_directory():
-    base = os.environ.get('LOCALAPPDATA') or str(Path.home() / 'AppData' / 'Local')
-    return Path(base) / 'Mac Remote Pairing'
+    return fixed_entry.default_runtime()
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument('--internet', action='store_true')
     parser.add_argument('--port', type=int, default=8766)
+    parser.add_argument('--fixed-entry', metavar='주소', help='고정 HTTPS 사이트 주소를 저장하고 인터넷 연결로 시작합니다. clear를 쓰면 설정을 지웁니다.')
     args = parser.parse_args(argv)
     for stream in (sys.stdout, sys.stderr):
         try:
@@ -100,6 +109,25 @@ def main(argv=None):
             pass
     runtime = runtime_directory()
     runtime.mkdir(parents=True, exist_ok=True)
+    if args.fixed_entry == 'clear':
+        fixed_entry.clear_origin(runtime)
+        print('고정 주소 설정을 지웠습니다.')
+        return 0
+    if args.fixed_entry:
+        try:
+            origin = fixed_entry.save_origin(runtime, args.fixed_entry)
+        except ValueError as error:
+            print(error, file=sys.stderr)
+            return 2
+        args.internet = True
+        print('고정 주소를 저장했습니다:', origin)
+    elif args.internet:
+        try:
+            saved = fixed_entry.load_origin(runtime)
+        except ValueError:
+            saved = None
+        if saved:
+            print('저장된 고정 주소를 사용합니다:', saved, '(설정을 지우려면 --fixed-entry clear)')
     command = [sys.executable, '-B', str(ROOT / 'server.py'), '--runtime', str(runtime), '--port', str(args.port)]
     if args.internet:
         command.append('--internet')

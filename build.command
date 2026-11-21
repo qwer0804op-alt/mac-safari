@@ -11,7 +11,7 @@ target="$(uname -m)-apple-macos14.0"
 
 mkdir -p "$contents/MacOS" "$contents/Resources/native"
 cp -X native/Info.plist "$contents/Info.plist"
-cp -X server.py certificates.py internet_tunnel.py "$contents/Resources/"
+cp -X server.py certificates.py internet_tunnel.py fixed_entry.py "$contents/Resources/"
 cp -RX public "$contents/Resources/"
 /usr/bin/swiftc -parse-as-library -target "$target" native/Launcher.swift native/ScreenCapture.swift native/RemoteInput.swift -o "$contents/MacOS/MacRemote"
 /usr/bin/swiftc -parse-as-library -target "$target" native/RemoteHelper.swift native/ScreenCapture.swift native/RemoteInput.swift -o "$contents/Resources/native/remote-helper"
