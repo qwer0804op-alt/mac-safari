@@ -1,6 +1,6 @@
 # Mac 리모컨
 
-Safari에서 Mac의 주 화면을 보고, 탭으로 클릭하고, 스크롤과 텍스트를 보낼 수 있어. **인터넷 연결**을 켜면 다른 Wi-Fi나 셀룰러에서도 접속할 수 있어. Mac에는 macOS 14 이상과 Apple Command Line Tools가 필요해.
+Safari에서 Mac(또는 Windows PC)의 주 화면을 보고, 탭으로 클릭하고, 스크롤과 텍스트를 보낼 수 있어. **인터넷 연결**을 켜면 다른 Wi-Fi나 셀룰러에서도 접속할 수 있어. Mac에는 macOS 14 이상과 Apple Command Line Tools가 필요해.
 
 ## 맥에서 시작하기
 
@@ -10,6 +10,24 @@ Safari에서 Mac의 주 화면을 보고, 탭으로 클릭하고, 스크롤과 �
 
 연결됐는데 화면이 비어 있으면 맥 앱에서 **화면 확인**을 눌러. 성공하면 이 Mac이 화면을 캡처했다는 메시지가 나와. 권한 안내가 나오면 **화면 보기 권한**에서 현재 설치한 Mac 리모컨의 화면 기록을 허용해. 앱을 다시 열었다면 맥에 새로 표시된 주소와 코드로 접속해.
 
+## 실시간 화면 (최대 60fps)
+
+화면 위쪽의 속도 선택에서 **60fps 부드럽게 / 30fps / 15fps 데이터 절약 / 1초마다 한 장**을 고를 수 있습니다. 같은 Wi-Fi에서는 60fps, 인터넷 연결에서는 30fps로 시작하고, 고른 값은 브라우저에 기억됩니다. 실제 프레임 수는 선택한 값이 **상한**이며, 화면을 캡처하는 속도와 네트워크 속도에 따라 낮아질 수 있습니다. 현재 프레임 수는 화면 아래에 `실시간 N fps`로 표시됩니다. 화면이 바뀌지 않으면 전송을 줄여 데이터와 전력을 아낍니다. 스트림이 안 되는 환경에서는 자동으로 1초마다 한 장씩 받는 방식으로 돌아갑니다.
+
+- **Windows**: 빠른 캡처를 위해 `pip install pillow mss`를 권장합니다. 설치하지 않으면 PowerShell로 한 장씩 캡처해서 몇 fps 정도로 제한됩니다. Pillow만 설치해도 크게 빨라집니다.
+- **Mac**: 앱이 화면을 한 장씩 캡처해서 서버에 전달하는 방식이라 60fps까지 나오기는 어렵습니다. 더 높이려면 ScreenCaptureKit 연속 캡처로 앱을 바꿔야 합니다.
+- 60fps는 JPEG 한 장이 수백 KB라서 데이터를 많이 씁니다. 셀룰러에서는 15fps나 30fps를 권장합니다.
+
+## 컴퓨터 브라우저에서 조작하기
+
+휴대폰이 아니라 다른 컴퓨터의 Chrome, Edge, Safari 같은 브라우저에서도 같은 주소와 4자리 코드로 연결할 수 있습니다.
+
+- **클릭**: 화면을 마우스로 누르면 해당 위치를 클릭합니다.
+- **스크롤**: 화면 위에서 마우스 휠을 돌리면 스크롤합니다. 빠르게 돌려도 묶어서 보내 Mac이나 PC가 밀리지 않습니다.
+- **키보드 입력**: 화면을 한 번 누르면 키보드가 연결됩니다. 글자와 한글이 그대로 입력되고, Enter, Tab, Esc, Backspace, Delete, 방향키, Home, End, PageUp, PageDown은 키로 전달됩니다. 붙여넣기(Ctrl+V 또는 ⌘V)한 글자도 보냅니다.
+- Ctrl, ⌘, Alt를 누른 단축키는 전달하지 않고 브라우저가 처리합니다.
+- 휴대폰에서 탭할 때는 화상 키보드가 열리지 않습니다. 휴대폰에서는 아래의 **텍스트 입력**을 사용해 주세요.
+
 ## 인터넷에서 연결하기
 
 1. Mac에 [cloudflared](https://developers.cloudflare.com/tunnel/downloads/)를 설치해. Homebrew를 쓰면 `brew install cloudflared`로 설치할 수 있어.
@@ -17,6 +35,10 @@ Safari에서 Mac의 주 화면을 보고, 탭으로 클릭하고, 스크롤과 �
 3. 접속을 기다리던 요청이면 Mac에서 **허용**을 눌러. 브라우저와 Mac 사이의 인터넷 연결은 Cloudflare가 중계하고, 브라우저의 연결은 최대 1시간 동안 유지돼.
 
 Mac 앱이나 인터넷 연결을 종료하면 공개 주소는 닫혀. 다시 켜면 새 주소가 발급되고, Mac은 켜져 있어야 해. [Cloudflare Quick Tunnel 안내](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/)
+
+## 고정 주소로 접속하기
+
+인터넷 연결의 주소는 켤 때마다 바뀝니다. 고정 사이트를 한 번 연결해 두면 컴퓨터와 휴대폰 모두 같은 웹 주소로 접속할 수 있습니다. 설정 방법은 [fixed-entry/README.md](fixed-entry/README.md)를 참고해 주세요. Windows는 `start-windows.bat --fixed-entry https://고정-사이트-주소`, Mac은 `python3 fixed_entry.py configure https://고정-사이트-주소`를 한 번 실행하면 됩니다.
 
 ## 같은 Wi-Fi에서 연결하기
 
@@ -30,6 +52,17 @@ Mac 앱 창을 닫으면 서버와 기존 연결이 종료돼. Mac의 Wi-Fi 주�
 ## Mac Safari에서 연결하기
 
 Mac 앱에서 **Safari 보안 설정 → Mac 인증서 보기**를 눌러. 표시된 공개 인증서를 키체인 접근의 로그인 키체인에 추가해. **Mac Remote Pairing CA**를 열고 **신뢰 → SSL**을 설정한 뒤 앱에 표시된 HTTPS 주소를 열어. [Apple 키체인 인증서 신뢰 설정 안내](https://support.apple.com/ko-kr/guide/keychain-access/kyca11871/mac)
+
+## Windows PC에서 사용하기
+
+Windows 10 이상, [Python 3](https://www.python.org/downloads/)(설치할 때 **Add python.exe to PATH** 선택), OpenSSL이 필요합니다. [Git for Windows](https://git-scm.com/download/win)에 OpenSSL이 들어 있어 따로 설치하지 않아도 됩니다. 다른 OpenSSL을 쓰려면 환경 변수 `MACREMOTE_OPENSSL`에 `openssl.exe` 경로를 지정해 주세요.
+
+1. 이 폴더에서 **start-windows.bat**을 실행해 주세요. 인터넷에서 연결하려면 명령 프롬프트에서 `start-windows.bat --internet`을 실행하고, 먼저 `winget install Cloudflare.cloudflared`로 cloudflared를 설치해 주세요.
+2. 창에 표시된 **접속 주소**를 휴대폰 브라우저에서 열고 **4자리 코드**를 입력해 주세요. 같은 Wi-Fi에서 연결할 때는 Windows 방화벽 허용 창이 나오면 **개인 네트워크**를 허용해 주세요.
+3. 같은 Wi-Fi에서 처음 연결할 때는 창에 표시된 인증서 파일을 휴대폰에 설치해야 합니다. 아이폰은 표시된 프로파일을 설치한 뒤 **인증서 신뢰 설정**을 켜 주세요. Android는 **설정 → 보안 → 암호화 및 사용자 인증 정보 → 인증서 설치 → CA 인증서**에서 인증서 파일을 선택해 주세요. 인터넷 연결은 인증서 설치가 필요 없습니다.
+4. 인터넷 연결에서는 휴대폰에서 코드를 입력하면 Windows 창에 승인 요청이 표시됩니다. 직접 요청한 연결이면 `y`를 입력해 주세요. `c`는 새 코드, `n`은 거절, `q`는 종료입니다.
+
+화면은 주 모니터만 전송합니다. 관리자 권한으로 실행한 프로그램, 잠금 화면, UAC 보안 데스크톱에는 입력할 수 없습니다. `pip install pillow`를 하면 화면 전송이 더 빨라집니다. 이 앱을 종료하면 공개 주소와 연결이 모두 닫힙니다.
 
 ## 테스트
 

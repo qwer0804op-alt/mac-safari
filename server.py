@@ -11,18 +11,26 @@ import sys
 import tempfile
 import threading
 import time
+import webbrowser
 from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
 from certificates import CertificateStore, local_addresses
+from fixed_entry import PROOF_PATH, QUICK_HOST, FixedEntry, load_origin, normalize_origin
 from internet_tunnel import quick_tunnel
+from screen_stream import FrameHub, clamp_fps
 
 ROOT = Path(__file__).resolve().parent
 PUBLIC = ROOT / 'public'
-HELPER = ROOT / 'native' / 'remote-helper'
+if sys.platform == 'win32':
+    HELPER = ROOT / 'windows_helper.py'
+    HELPER_COMMAND = [sys.executable, '-I', str(HELPER)]
+else:
+    HELPER = ROOT / 'native' / 'remote-helper'
+    HELPER_COMMAND = [str(HELPER)]
 MAX_BODY = 16384
 SESSION_SECONDS = 12 * 60 * 60
 INTERNET_SESSION_SECONDS = 60 * 60
@@ -305,7 +313,9 @@ class RemoteState:
 
 
 class RemoteHTTPServer(ThreadingHTTPServer):
-    def __init__(self, address, context, state, app_capture=None, app_input=None):
+    def __init__(self, address, context, state, app_capture=None, app_input=None, fixed_entry=None):
+        self.fixed_entry = fixed_entry
+        self.frames = FrameHub(self.capture_frame)
         self.context = context
         self.state = state
         self.app_capture = app_capture
@@ -314,7 +324,13 @@ class RemoteHTTPServer(ThreadingHTTPServer):
         self.request_slots = threading.BoundedSemaphore(24) if state.internet else None
         super().__init__(address, Handler)
 
+    def capture_frame(self):
+        if self.app_capture is not None:
+            return self.app_capture.read()
+        return capture_with_helper()
+
     def stop_operations(self):
+        self.frames.stop()
         if self.app_capture is not None:
             self.app_capture.stop()
         if self.app_input is not None:
@@ -361,7 +377,7 @@ def valid_action(data):
         return ['click', str(round(x)), str(round(y))]
     if kind == 'scroll':
         dy = data.get('dy')
-        if isinstance(dy, bool) or not isinstance(dy, (int, float)) or not -1000 <= dy <= 1000:
+        if isinstance(dy, bool) or not isinstance(dy, (int, float)) or not -1000 <= dy <= 1000 or round(dy) == 0:
             raise ValueError('스크롤 값이 올바르지 않습니다.')
         return ['scroll', str(round(dy))]
     if kind == 'key':
@@ -384,12 +400,19 @@ def valid_action(data):
 
 def run_helper(args, timeout=15):
     with helper_lock:
-        proc = subprocess.run([str(HELPER), *args], capture_output=True, text=True, timeout=timeout)
+        proc = subprocess.run([*HELPER_COMMAND, *args], capture_output=True, text=True, encoding='utf-8', errors='replace',
+                              timeout=timeout, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     if proc.returncode:
         raise RuntimeError((proc.stderr or 'Mac 제어에 실패했습니다.').strip()[:800])
 
 
 def capture_with_helper():
+    if sys.platform == 'win32':
+        import windows_helper
+        try:
+            return windows_helper.grab_jpeg()
+        except windows_helper.HelperError as exc:
+            raise RuntimeError(str(exc)) from None
     with tempfile.TemporaryDirectory(prefix='macremote-screen-') as tmp:
         image_path = Path(tmp) / 'screen.jpg'
         run_helper(['screenshot', str(image_path)])
@@ -403,10 +426,7 @@ class Handler(BaseHTTPRequestHandler):
         # Never log access codes, session cookies, or messages.
         pass
 
-    def send_bytes(self, status, body, content_type, headers=()):
-        self.send_response(status)
-        self.send_header('Content-Type', content_type)
-        self.send_header('Content-Length', str(len(body)))
+    def send_security_headers(self):
         self.send_header('Cache-Control', 'no-store')
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('X-Frame-Options', 'DENY')
@@ -414,6 +434,12 @@ class Handler(BaseHTTPRequestHandler):
         if self.server.state.internet:
             self.send_header('X-Robots-Tag', 'noindex, nofollow')
         self.send_header('Content-Security-Policy', "default-src 'self'; img-src 'self' blob:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'")
+
+    def send_bytes(self, status, body, content_type, headers=()):
+        self.send_response(status)
+        self.send_header('Content-Type', content_type)
+        self.send_header('Content-Length', str(len(body)))
+        self.send_security_headers()
         for name, value in headers:
             self.send_header(name, value)
         self.end_headers()
@@ -463,12 +489,63 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError('요청 형식이 올바르지 않습니다.')
         return result
 
+    def stream_screen(self, query):
+        if not self.authenticated():
+            return self.send_json(401, {'error': '먼저 연결 코드를 입력해 주세요.'})
+        hub = self.server.frames
+        try:
+            viewer = hub.subscribe(clamp_fps(parse_qs(query).get('fps', [None])[0]))
+        except RuntimeError as exc:
+            return self.send_json(503, {'error': str(exc)[:800]})
+        try:
+            try:
+                seq, frame = hub.wait_first()
+            except RuntimeError as exc:
+                return self.send_json(503, {'error': str(exc)[:800]})
+            self.send_response(200)
+            self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=frame')
+            self.send_security_headers()
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            self.close_connection = True
+            while True:
+                head = f'--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {len(frame)}\r\n\r\n'.encode()
+                self.wfile.write(head + frame + b'\r\n')
+                self.wfile.flush()
+                update = hub.wait_next(seq)
+                if update is None or not self.authenticated():
+                    return
+                # A repeated frame is a keep-alive for a screen that did not change.
+                seq, frame, _ = update
+        except (OSError, ValueError):
+            return
+        finally:
+            hub.unsubscribe(viewer)
+
+    def send_proof(self, nonce):
+        # The fixed entry site asks for a signature over a fresh nonce to prove who owns this address.
+        entry, host = self.server.fixed_entry, self.server.public_host
+        if not self.server.state.internet or not QUICK_HOST.fullmatch(host or '') or not entry.sign_slots.acquire(blocking=False):
+            return self.send_json(503, {})
+        try:
+            signature = entry.proof(host, nonce)
+        except (OSError, RuntimeError, subprocess.SubprocessError):
+            return self.send_json(503, {})
+        finally:
+            entry.sign_slots.release()
+        return self.send_json(200, {'signature': signature})
+
     def do_GET(self):
         if not self.valid_host():
             return self.send_json(403, {'error': 'Mac 앱에 표시된 인터넷 주소로 접속해 주세요.'})
         path = urlsplit(self.path).path
+        proof = PROOF_PATH.fullmatch(path)
+        if proof is not None and self.server.fixed_entry is not None:
+            return self.send_proof(proof[1])
+        if path == '/api/stream':
+            return self.stream_screen(urlsplit(self.path).query)
         if path == '/api/status':
-            return self.send_json(200, {'authenticated': self.authenticated(), 'internet': self.server.state.internet})
+            return self.send_json(200, {'authenticated': self.authenticated(), 'internet': self.server.state.internet, 'platform': 'windows' if sys.platform == 'win32' else 'mac'})
         if path == '/api/screen':
             if not self.authenticated():
                 return self.send_json(401, {'error': '먼저 연결 코드를 입력해 주세요.'})
@@ -498,7 +575,7 @@ class Handler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         try:
             data = self.read_json()
-        except (ValueError, UnicodeError, TimeoutError):
+        except (ValueError, UnicodeError, TimeoutError, RecursionError):
             return self.send_json(400, {'error': '요청 형식이 올바르지 않습니다.'})
         if path == '/api/login':
             return self.send_json(*self.server.state.pair(data.get('code')))
@@ -562,13 +639,26 @@ def serve_internet(server, state, certificates, stopped, ready):
         if stopped.is_set():
             return
         server.public_host = urlsplit(address).hostname
+        entry = server.fixed_entry
 
         def watch_tunnel():
             tunnel.wait()
             server.shutdown()
 
-        state.issue_code('ready', urls=[address], **ready)
+        def announce_entry():
+            # Give serve_forever a moment so the site can verify this address right away.
+            time.sleep(0.3)
+            try:
+                url = entry.registration_url(server.public_host)
+                publish({'event': 'register', 'url': url, 'fingerprint': entry.fingerprint()})
+                webbrowser.open(url)
+            except (OSError, RuntimeError, subprocess.SubprocessError, webbrowser.Error) as exc:
+                publish({'event': 'register-failed', 'error': str(exc)[:300]})
+
+        state.issue_code('ready', urls=[entry.origin if entry else address], **ready)
         threading.Thread(target=watch_tunnel, daemon=True).start()
+        if entry is not None:
+            threading.Thread(target=announce_entry, daemon=True).start()
         server.serve_forever(poll_interval=0.2)
         if not stopped.is_set():
             raise RuntimeError('인터넷 연결이 끊겼습니다. 다시 시작을 눌러 주세요.')
@@ -579,6 +669,7 @@ def main():
     parser.add_argument('--port', type=int, default=8766)
     parser.add_argument('--host')
     parser.add_argument('--internet', action='store_true')
+    parser.add_argument('--fixed-entry', help='고정 HTTPS 사이트의 첫 화면 주소 (인터넷 연결 모드)')
     parser.add_argument('--app-capture', action='store_true')
     parser.add_argument('--runtime', type=Path, required=True)
     args = parser.parse_args()
@@ -586,8 +677,16 @@ def main():
         parser.error('인터넷 연결 모드의 서버는 이 Mac 안에서만 열 수 있습니다.')
     host = '127.0.0.1' if args.internet else args.host or '0.0.0.0'
     if not args.app_capture and not HELPER.is_file():
-        raise SystemExit('Mac 제어 도구를 찾을 수 없습니다. 앱을 다시 빌드해 주세요.')
+        raise SystemExit('제어 도구를 찾을 수 없습니다. 앱을 다시 설치하거나 빌드해 주세요.')
     os.umask(0o077)
+    fixed_entry = None
+    if args.internet:
+        origin = args.fixed_entry or load_origin(args.runtime)
+        if origin:
+            fixed_entry = FixedEntry(args.runtime.resolve(), normalize_origin(origin))
+            fixed_entry.ensure_key()
+    elif args.fixed_entry:
+        parser.error('고정 주소는 인터넷 연결 모드에서만 쓸 수 있습니다.')
     ips = [] if host == '127.0.0.1' else local_addresses()
     certificates = CertificateStore(args.runtime.resolve())
     context = certificates.prepare(ips)
@@ -595,7 +694,7 @@ def main():
     state = RemoteState(publish, internet=args.internet)
     app_capture = AppCapture(publish) if args.app_capture else None
     app_input = AppInput(publish) if args.app_capture else None
-    with RemoteHTTPServer((host, args.port), context, state, app_capture=app_capture, app_input=app_input) as server:
+    with RemoteHTTPServer((host, args.port), context, state, app_capture=app_capture, app_input=app_input, fixed_entry=fixed_entry) as server:
         bound_host, port = server.server_address
         ready = {'port': port, 'certificate': str(certificates.public_cert), 'profile': str(profile)}
         stopped = threading.Event()

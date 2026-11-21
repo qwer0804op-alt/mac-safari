@@ -2,34 +2,93 @@
 """Create a private local CA and a host-validated HTTPS certificate for Mac Remote.
 
 The CA is kept stable across IP changes; only the leaf certificate is reissued.
-Private material is stored in a user-only directory in Application Support.
+Private material is stored in a user-only directory in Application Support
+(macOS) or the user's AppData folder (Windows).
 """
-import fcntl
+from contextlib import contextmanager
 import hashlib
 import ipaddress
 import os
 from pathlib import Path
 import plistlib
 import secrets
+import shutil
 import socket
 import ssl
 import subprocess
+import sys
 import tempfile
 import threading
 from uuid import NAMESPACE_URL, uuid5
 
+if os.name == 'nt':
+    import msvcrt
+else:
+    import fcntl
+
 OPENSSL = '/usr/bin/openssl'
+WINDOWS_OPENSSL = (
+    r'C:\Program Files\Git\usr\bin\openssl.exe',
+    r'C:\Program Files\Git\mingw64\bin\openssl.exe',
+    r'C:\Program Files\OpenSSL-Win64\bin\openssl.exe',
+    r'C:\Program Files\OpenSSL\bin\openssl.exe',
+)
+NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+
+
+def openssl_path():
+    if sys.platform == 'darwin':
+        return OPENSSL
+    configured = os.environ.get('MACREMOTE_OPENSSL')
+    if configured and Path(configured).is_file():
+        return configured
+    found = shutil.which('openssl')
+    if found:
+        return found
+    if os.name == 'nt':
+        for candidate in WINDOWS_OPENSSL:
+            if Path(candidate).is_file():
+                return candidate
+        raise RuntimeError('OpenSSL을 찾을 수 없습니다. Git for Windows 또는 OpenSSL을 설치하거나 MACREMOTE_OPENSSL에 openssl.exe 경로를 지정해 주세요.')
+    return OPENSSL
 
 
 def run(*args):
-    completed = subprocess.run([OPENSSL, *map(str, args)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    completed = subprocess.run([openssl_path(), *map(str, args)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False, creationflags=NO_WINDOW)
     if completed.returncode:
         detail = completed.stderr.decode('utf-8', 'replace').strip()[-1000:]
         raise RuntimeError('인증서 처리에 실패했습니다. ' + detail)
     return completed.stdout
 
 
+def usable_address(value):
+    try:
+        address = ipaddress.IPv4Address(value)
+    except ValueError:
+        return False
+    return not (address.is_unspecified or address.is_loopback or address.is_link_local or address.is_multicast)
+
+
+def generic_addresses():
+    result = set()
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            # Connecting a UDP socket sends nothing; it only selects the outgoing interface.
+            probe.connect(('10.255.255.255', 1))
+            result.add(probe.getsockname()[0])
+    except OSError:
+        pass
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            result.add(info[4][0])
+    except OSError:
+        pass
+    return sorted((value for value in result if usable_address(value)), key=lambda value: int(ipaddress.ip_address(value)))
+
+
 def local_addresses():
+    if sys.platform != 'darwin':
+        return generic_addresses()
     result = set()
     for _, interface in socket.if_nameindex():
         if not interface.startswith('en'):
@@ -42,6 +101,24 @@ def local_addresses():
         except ValueError:
             pass
     return sorted(result, key=lambda value: int(ipaddress.ip_address(value)))
+
+
+@contextmanager
+def file_lock(handle):
+    if os.name == 'nt':
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        try:
+            yield
+        finally:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
 
 
 def atomic_install(src, dst, mode):
@@ -152,7 +229,9 @@ subjectAltName = @alt_names
 DNS.1 = localhost
 ''' + alt_names + '\n', encoding='ascii')
         key, csr, cert = tmp / 'server-key.pem', tmp / 'server.csr', tmp / 'server.pem'
-        run('req', '-new', '-newkey', 'rsa:2048', '-nodes', '-sha256', '-subj', '/CN=Mac Remote', '-keyout', key, '-out', csr)
+        request_config = tmp / 'request.conf'
+        request_config.write_text('[req]\ndistinguished_name = dn\nprompt = no\n[dn]\nCN = Mac Remote\n', encoding='ascii')
+        run('req', '-new', '-config', request_config, '-newkey', 'rsa:2048', '-nodes', '-sha256', '-subj', '/CN=Mac Remote', '-keyout', key, '-out', csr)
         serial = '0x' + format(secrets.randbits(159) | 1, 'x')
         run('x509', '-req', '-in', csr, '-CA', self.ca_pem, '-CAkey', self.ca_key, '-set_serial', serial, '-days', '364', '-sha256', '-extfile', config, '-extensions', 'server_ext', '-out', cert)
         context = self.validate(cert, key, ips)
@@ -183,8 +262,7 @@ DNS.1 = localhost
         lock_path = self.private / 'certificates.lock'
         with lock_path.open('a') as lock:
             lock_path.chmod(0o600)
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            with tempfile.TemporaryDirectory(prefix='cert-', dir=self.private) as name:
+            with file_lock(lock), tempfile.TemporaryDirectory(prefix='cert-', dir=self.private) as name:
                 tmp = Path(name)
                 self.ensure_ca(tmp)
                 certificate_ips = ['127.0.0.1', *ips]

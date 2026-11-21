@@ -23,6 +23,22 @@ let inputGeneration = 0;
 let gesture = null;
 let statusRequest = null;
 let statusRetry = null;
+let deviceName = 'Mac';
+let streamFailed = false;
+let streamFailures = 0;
+let pendingFrame = null;
+let presenting = false;
+const fpsSelect = $('fpsSelect');
+const stallMs = 8000;
+let wheelTotal = 0;
+let wheelTimer = null;
+let wheelBusy = false;
+const keyCatcher = $('keyCatcher');
+const keyNames = {
+  Enter: 'enter', Tab: 'tab', Escape: 'escape', Backspace: 'backspace', Delete: 'delete',
+  ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
+  Home: 'home', End: 'end', PageUp: 'pageup', PageDown: 'pagedown',
+};
 
 function setStatus(connected, text) {
   $('statusDot').classList.toggle('connected', connected);
@@ -31,8 +47,16 @@ function setStatus(connected, text) {
 
 function connectionError() {
   return internetMode
-    ? 'Mac에 연결할 수 없습니다. Mac 리모컨에서 인터넷 공유 상태를 확인해 주세요.'
-    : 'Mac에 연결할 수 없습니다. Wi-Fi와 Mac 리모컨 실행 상태를 확인해 주세요.';
+    ? `${deviceName}에 연결할 수 없습니다. Mac 리모컨에서 인터넷 공유 상태를 확인해 주세요.`
+    : `${deviceName}에 연결할 수 없습니다. Wi-Fi와 Mac 리모컨 실행 상태를 확인해 주세요.`;
+}
+
+function applyPlatform(platform) {
+  deviceName = platform === 'windows' ? 'PC' : 'Mac';
+  document.querySelectorAll('[data-device]').forEach((element) => {
+    element.textContent = element.dataset.device.replace('{d}', deviceName);
+  });
+  screen.alt = `${deviceName} 화면. 누르면 해당 위치를 클릭합니다.`;
 }
 
 function clearScreen(message = '화면을 불러오는 중', loading = true) {
@@ -55,11 +79,16 @@ function cancelScreenRefresh() {
 
 function pauseScreen(message, loading) {
   inputGeneration++;
+  clearTimeout(wheelTimer);
+  wheelTimer = null;
+  wheelTotal = 0;
+  keyCatcher.value = '';
   cancelScreenRefresh();
   clearScreen(message, loading);
 }
 
 function showLogin(message = '') {
+  setImmersive(false);
   if (session) session.abort();
   session = null;
   actionQueue = Promise.resolve();
@@ -72,6 +101,15 @@ function showLogin(message = '') {
   codeInput.value = '';
   codeInput.removeAttribute('aria-invalid');
   setStatus(false, '연결 안 됨');
+  codeInput.focus({ preventScroll: true });
+}
+
+function savedFps() {
+  try {
+    const value = localStorage.getItem('macRemoteFps');
+    if (['60', '30', '15', '0'].includes(value)) return value;
+  } catch {}
+  return null;
 }
 
 function showControl() {
@@ -79,6 +117,9 @@ function showControl() {
   controlView.hidden = false;
   loginMessage.textContent = '';
   if (!session) {
+    fpsSelect.value = savedFps() ?? (internetMode ? '30' : '60');
+    streamFailed = false;
+    streamFailures = 0;
     session = new AbortController();
     $('lastUpdate').textContent = '불러오는 중';
     setStatus(true, '연결됨');
@@ -122,12 +163,14 @@ async function checkStatus() {
     const status = await response.json();
     if (statusRequest !== request) return;
     internetMode = status.internet === true;
+    applyPlatform(status.platform);
     if (internetMode) $('codeHint').textContent = 'Mac 리모컨의 4자리 코드를 입력한 다음, Mac에서 연결을 승인해 주세요.';
     if (status.authenticated === true) showControl();
     else {
       loginView.hidden = false;
       loginMessage.textContent = '';
       setStatus(false, '연결 안 됨');
+      codeInput.focus({ preventScroll: true });
     }
   } catch {
     if (statusRequest !== request) return;
@@ -144,6 +187,10 @@ async function checkStatus() {
 codeInput.addEventListener('input', () => {
   codeInput.removeAttribute('aria-invalid');
   if (!loginPending) loginMessage.textContent = '';
+  const digits = codeInput.value.replace(/[^0-9]/g, '');
+  if (digits !== codeInput.value) codeInput.value = digits;
+  // The fourth digit connects right away, so no extra tap is needed.
+  if (digits.length === 4 && !loginPending) $('loginForm').requestSubmit();
 });
 
 $('loginForm').addEventListener('submit', async (event) => {
@@ -205,8 +252,117 @@ $('logoutButton').addEventListener('click', async () => {
   if (session === currentSession) showLogin(sessionEnded);
 });
 
+function findPart(buffer) {
+  // One part: headers, a blank line, Content-Length bytes of JPEG, then CRLF.
+  let end = -1;
+  for (let index = 0; index + 3 < buffer.length && index < 512; index++) {
+    if (buffer[index] === 13 && buffer[index + 1] === 10 && buffer[index + 2] === 13 && buffer[index + 3] === 10) { end = index; break; }
+  }
+  if (end < 0) return null;
+  const length = Number(/content-length:\s*(\d+)/i.exec(new TextDecoder().decode(buffer.subarray(0, end)))?.[1]);
+  if (!Number.isInteger(length) || length <= 0 || length > 50 * 1024 * 1024) throw new Error('화면 스트림 형식이 올바르지 않습니다.');
+  const start = end + 4;
+  if (buffer.length < start + length + 2) return null;
+  return { body: buffer.subarray(start, start + length), rest: buffer.subarray(start + length + 2) };
+}
+
+async function showStreamFrame(blob, counters) {
+  const url = URL.createObjectURL(blob);
+  const oldUrl = currentImageUrl;
+  try {
+    screen.src = url;
+    await screen.decode();
+  } catch {
+    URL.revokeObjectURL(url);
+    if (currentImageUrl === oldUrl && oldUrl) screen.src = oldUrl;
+    return;
+  }
+  currentImageUrl = url;
+  if (oldUrl) URL.revokeObjectURL(oldUrl);
+  const size = { width: screen.naturalWidth, height: screen.naturalHeight };
+  if (lastImageSize && (lastImageSize.width !== size.width || lastImageSize.height !== size.height)) gesture = null;
+  lastImageSize = size;
+  $('screenPlaceholder').hidden = true;
+  setStatus(true, '연결됨');
+  counters.shown++;
+}
+
+async function startStream(fps) {
+  clearTimeout(refreshTimer);
+  const request = new AbortController();
+  screenRequest = request;
+  const { signal } = request;
+  const counters = { shown: 0 };
+  let received = 0;
+  let stall = null;
+  let report = null;
+  const arm = () => { clearTimeout(stall); stall = setTimeout(() => request.abort(), stallMs); };
+  const present = async () => {
+    if (presenting) return;
+    presenting = true;
+    try {
+      while (pendingFrame && screenRequest === request) {
+        const blob = pendingFrame;
+        pendingFrame = null;
+        await showStreamFrame(blob, counters);
+      }
+    } finally { presenting = false; }
+  };
+  let failure = null;
+  try {
+    arm();
+    const response = await api(`/api/stream?fps=${fps}`, { signal });
+    const reader = response.body.getReader();
+    let buffer = new Uint8Array(0);
+    let last = performance.now();
+    report = setInterval(() => {
+      const now = performance.now();
+      if (screenRequest === request && counters.shown) $('lastUpdate').textContent = `실시간 ${Math.round(counters.shown * 1000 / (now - last))}fps`;
+      counters.shown = 0;
+      last = now;
+    }, 1000);
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      arm();
+      const joined = new Uint8Array(buffer.length + value.length);
+      joined.set(buffer);
+      joined.set(value, buffer.length);
+      buffer = joined;
+      for (let part = findPart(buffer); part; part = findPart(buffer)) {
+        buffer = part.rest;
+        received++;
+        pendingFrame = new Blob([part.body], { type: 'image/jpeg' });
+        present();
+      }
+    }
+  } catch (error) {
+    failure = error;
+  } finally {
+    clearTimeout(stall);
+    clearInterval(report);
+  }
+  if (screenRequest !== request) return;
+  screenRequest = null;
+  pendingFrame = null;
+  if (failure?.status === 401) return showLogin(sessionEnded);
+  if (received > 0) streamFailures = 0;
+  else if (failure?.status || ++streamFailures >= 2) streamFailed = true;
+  refreshTimer = setTimeout(refreshScreen, received > 0 ? 400 : 200);
+}
+
+fpsSelect.addEventListener('change', () => {
+  try { localStorage.setItem('macRemoteFps', fpsSelect.value); } catch {}
+  streamFailed = false;
+  streamFailures = 0;
+  if (!session || document.hidden) return;
+  cancelScreenRefresh();
+  refreshScreen();
+});
+
 async function refreshScreen() {
   if (!session || document.hidden || !navigator.onLine || screenRequest) return;
+  if (fpsSelect.value !== '0' && !streamFailed && window.ReadableStream) return startStream(Number(fpsSelect.value));
   clearTimeout(refreshTimer);
   const request = new AbortController();
   screenRequest = request;
@@ -266,6 +422,8 @@ async function refreshScreen() {
 $('refreshButton').addEventListener('click', () => {
   if (!session || document.hidden) return;
   cancelScreenRefresh();
+  streamFailed = false;
+  streamFailures = 0;
   if (!lastImageSize) {
     clearScreen();
     $('lastUpdate').textContent = '불러오는 중';
@@ -357,6 +515,9 @@ screen.addEventListener('pointerup', (event) => {
       const x = Math.max(0, Math.min(lastImageSize.width - 1, Math.floor((event.clientX - rect.left) / rect.width * lastImageSize.width)));
       const y = Math.max(0, Math.min(lastImageSize.height - 1, Math.floor((event.clientY - rect.top) / rect.height * lastImageSize.height)));
       sendAction({ type: 'click', x, y });
+      showRipple(event);
+      // Only a mouse focuses the hidden keyboard field, so phones keep their on-screen keyboard closed.
+      if (event.pointerType === 'mouse') keyCatcher.focus({ preventScroll: true });
     }
   }
   gesture = null;
@@ -367,6 +528,91 @@ function cancelGesture(event) {
 
 screen.addEventListener('pointercancel', cancelGesture);
 screen.addEventListener('lostpointercapture', cancelGesture);
+
+screen.addEventListener('wheel', (event) => {
+  if (!session || !lastImageSize) return;
+  event.preventDefault();
+  const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? screen.clientHeight : 1;
+  wheelTotal += event.deltaY * unit;
+  if (!wheelTimer && !wheelBusy) wheelTimer = setTimeout(flushWheel, 50);
+}, { passive: false });
+
+async function flushWheel() {
+  wheelTimer = null;
+  const dy = Math.max(-1000, Math.min(1000, Math.round(wheelTotal * 2)));
+  wheelTotal = 0;
+  if (!dy) return;
+  wheelBusy = true;
+  try {
+    await sendAction({ type: 'scroll', dy });
+  } finally {
+    wheelBusy = false;
+    if (wheelTotal && !wheelTimer) wheelTimer = setTimeout(flushWheel, 50);
+  }
+}
+
+function showRipple(event) {
+  const ripple = $('ripple');
+  const area = screen.parentElement.getBoundingClientRect();
+  ripple.style.left = `${event.clientX - area.left}px`;
+  ripple.style.top = `${event.clientY - area.top}px`;
+  ripple.classList.remove('go');
+  void ripple.offsetWidth;
+  ripple.classList.add('go');
+}
+
+function setImmersive(on) {
+  document.body.classList.toggle('immersive', on);
+  if (!on) {
+    document.body.classList.remove('tools-open');
+    $('toolsButton').setAttribute('aria-expanded', 'false');
+  }
+  const button = $('immersiveButton');
+  button.setAttribute('aria-pressed', String(on));
+  button.textContent = on ? '⤡' : '⛶';
+  button.setAttribute('aria-label', on ? '전체 화면 닫기' : '전체 화면');
+  button.title = button.getAttribute('aria-label');
+  if (on && !document.fullscreenElement && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
+  if (!on && document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+}
+
+$('immersiveButton').addEventListener('click', () => setImmersive(!document.body.classList.contains('immersive')));
+$('toolsButton').addEventListener('click', () => {
+  const open = document.body.classList.toggle('tools-open');
+  $('toolsButton').setAttribute('aria-expanded', String(open));
+});
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement && document.body.classList.contains('immersive')) setImmersive(false);
+});
+
+document.querySelectorAll('[data-tab]').forEach((tab) => tab.addEventListener('click', () => {
+  document.querySelectorAll('[data-tab]').forEach((other) => other.setAttribute('aria-selected', String(other === tab)));
+  document.querySelectorAll('.tab-panel').forEach((panel) => panel.classList.toggle('active', panel.id === tab.dataset.tab));
+}));
+
+$('inputHint').textContent = matchMedia('(pointer: coarse)').matches
+  ? '탭하면 클릭, 밀면 스크롤'
+  : '누른 뒤 키보드로 입력, 휠로 스크롤';
+
+function flushTyped() {
+  const text = keyCatcher.value.replaceAll('\0', '');
+  keyCatcher.value = '';
+  if (!text || !session) return;
+  const characters = Array.from(text);
+  for (let index = 0; index < characters.length; index += 1000) {
+    sendAction({ type: 'type', text: characters.slice(index, index + 1000).join('') });
+  }
+}
+
+keyCatcher.addEventListener('keydown', (event) => {
+  if (event.isComposing || event.keyCode === 229 || event.ctrlKey || event.metaKey || event.altKey) return;
+  const key = keyNames[event.key];
+  if (!key) return;
+  event.preventDefault();
+  sendAction({ type: 'key', key });
+});
+keyCatcher.addEventListener('input', (event) => { if (!event.isComposing) flushTyped(); });
+keyCatcher.addEventListener('compositionend', flushTyped);
 
 $('textForm').addEventListener('submit', async (event) => {
   event.preventDefault();

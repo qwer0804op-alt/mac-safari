@@ -1,0 +1,24 @@
+name: Delete v2.3.0 release
+
+on:
+  push:
+    branches: [claude/charming-cerf-yjtzxu]
+    paths: [.github/workflows/delete-v2.3.0.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete release and tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view v2.3.0 >/dev/null 2>&1; then
+            gh release delete v2.3.0 --cleanup-tag --yes
+          else
+            echo "release not found"
+          fi

@@ -101,7 +101,7 @@ class PairingTest(unittest.TestCase):
         self.assertIsNone(bridge.pending)
 
     def exercise_launcher(self, root, exercise, *options):
-        for name in ('server.py', 'certificates.py', 'internet_tunnel.py'):
+        for name in ('server.py', 'certificates.py', 'internet_tunnel.py', 'fixed_entry.py', 'screen_stream.py'):
             shutil.copyfile(ROOT / name, root / name)
         shutil.copytree(ROOT / 'public', root / 'public')
         helper = root / 'native' / 'remote-helper'
@@ -183,6 +183,13 @@ class PairingTest(unittest.TestCase):
         self.assertEqual((status, headers['Content-Type'], body), (200, 'image/jpeg', b'jpeg-test'))
         self.assertEqual(headers['Cache-Control'], 'no-store')
         self.assertEqual(self.request('POST', '/api/action', {'type': 'click', 'x': 12, 'y': 13}, cookie)[0], 200)
+        for scroll in (0, 0.4, -0.4):
+            self.assertEqual(self.request('POST', '/api/action', {'type': 'scroll', 'dy': scroll}, cookie)[0], 400)
+        self.assertEqual(self.request('POST', '/api/action', {'type': 'scroll', 'dy': 0.6}, cookie)[0], 200)
+        nested = b'[' * 5000 + b']' * 5000
+        self.assertEqual(self.request('POST', '/api/action', nested, cookie)[0], 400)
+        self.assertEqual(self.request('POST', '/api/login', nested)[0], 400)
+        self.assertEqual(self.request('GET', '/api/status')[0], 200)
         self.assertEqual(self.request('POST', '/api/logout', {}, cookie)[0], 200)
         self.assertEqual(self.request('GET', '/api/screen', cookie=cookie)[0], 401)
 
@@ -247,7 +254,7 @@ class PairingTest(unittest.TestCase):
         headers = {}
         if body is not None:
             headers['Content-Type'] = 'application/json'
-            body = json.dumps(body).encode()
+            body = body if isinstance(body, bytes) else json.dumps(body).encode()
         if cookie is not None:
             headers['Cookie'] = cookie
         if origin:

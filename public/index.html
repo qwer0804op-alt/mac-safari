@@ -21,7 +21,7 @@
     </header>
 
     <section class="login card" id="loginView" hidden>
-      <h1>내 Mac에 연결하기</h1>
+      <h1 data-device="내 {d}에 연결하기">내 Mac에 연결하기</h1>
       <p class="muted" id="codeHint">Mac 리모컨에 표시된 4자리 코드를 입력해 주세요.</p>
       <form id="loginForm" novalidate>
         <label for="code">4자리 연결 코드</label>
@@ -32,15 +32,32 @@
     </section>
 
     <section class="control" id="controlView" hidden>
-      <div class="intro"><h1>원격 제어</h1><button class="quiet" id="logoutButton">연결 종료</button></div>
-      <div class="screen-card card">
-        <div class="screen-toolbar"><span>Mac 화면</span><button class="icon-button" id="refreshButton" aria-label="화면 새로고침" title="새로고침">↻</button></div>
-        <div class="screen-wrap"><img id="screen" alt="Mac 화면. 누르면 해당 위치를 클릭합니다." draggable="false"><div class="screen-placeholder" id="screenPlaceholder"><span class="spinner" id="screenSpinner" aria-hidden="true"></span><span id="screenMessage">화면을 불러오는 중</span></div></div>
-        <div class="screen-footer"><span>탭하면 클릭</span><span>밀면 스크롤</span><span id="lastUpdate">연결 중</span></div>
-      </div>
-      <div class="tools-grid">
-        <section class="tool-card card"><div class="section-title"><h2>텍스트 입력</h2><span class="section-icon" aria-hidden="true">⌨</span></div><p class="description">Mac 화면에서 입력할 위치를 누른 뒤 내용을 보내 주세요.</p><form id="textForm"><textarea id="textInput" rows="3" maxlength="2000" placeholder="여기에 입력해 주세요" aria-label="보낼 텍스트"></textarea><button class="primary" type="submit">텍스트 보내기 <span aria-hidden="true">↗</span></button></form></section>
-        <section class="tool-card card"><div class="section-title"><h2>키와 스크롤</h2></div><div class="key-grid"><button data-key="escape">esc</button><button data-key="tab">tab</button><button data-key="backspace" aria-label="백스페이스">⌫</button><button data-key="enter">enter ↵</button><button data-key="left" aria-label="왼쪽 화살표">←</button><button data-key="up" aria-label="위쪽 화살표">↑</button><button data-key="down" aria-label="아래쪽 화살표">↓</button><button data-key="right" aria-label="오른쪽 화살표">→</button></div><div class="scroll-controls"><button data-scroll="-400">↑ 위로 스크롤</button><button data-scroll="400">↓ 아래로 스크롤</button></div></section>
+      <div class="workspace">
+        <div class="screen-card card" id="screenCard">
+          <div class="screen-toolbar">
+            <span class="screen-title" data-device="{d} 화면">Mac 화면</span>
+            <div class="toolbar-actions">
+              <select id="fpsSelect" class="speed-select" aria-label="화면 갱신 속도"><option value="60">60fps 부드럽게</option><option value="30">30fps</option><option value="15">15fps 데이터 절약</option><option value="0">1초마다 한 장</option></select>
+              <button class="icon-button" id="toolsButton" aria-label="입력 도구 열기" title="입력 도구" aria-expanded="false"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg></button>
+              <button class="icon-button" id="refreshButton" aria-label="화면 새로고침" title="새로고침">↻</button>
+              <button class="icon-button" id="immersiveButton" aria-label="전체 화면" title="전체 화면" aria-pressed="false">⛶</button>
+              <button class="quiet" id="logoutButton">연결 종료</button>
+            </div>
+          </div>
+          <div class="screen-wrap"><img id="screen" alt="Mac 화면. 누르면 해당 위치를 클릭합니다." draggable="false"><span class="ripple" id="ripple" aria-hidden="true"></span><div class="screen-placeholder" id="screenPlaceholder"><span class="spinner" id="screenSpinner" aria-hidden="true"></span><span id="screenMessage">화면을 불러오는 중</span></div></div>
+          <textarea id="keyCatcher" class="key-catcher" rows="1" tabindex="-1" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="컴퓨터 키보드 입력"></textarea>
+          <div class="screen-footer"><span id="inputHint">탭하면 클릭, 밀면 스크롤</span><span id="lastUpdate">연결 중</span></div>
+        </div>
+        <aside class="tool-panel card" id="toolPanel" aria-label="입력 도구">
+          <div class="tabs" role="tablist" aria-label="입력 도구 종류">
+            <button role="tab" id="tabText" aria-controls="panelText" aria-selected="true" data-tab="panelText">글자 입력</button>
+            <button role="tab" id="tabKeys" aria-controls="panelKeys" aria-selected="false" data-tab="panelKeys">키</button>
+            <button role="tab" id="tabScroll" aria-controls="panelScroll" aria-selected="false" data-tab="panelScroll">스크롤</button>
+          </div>
+          <section class="tab-panel active" id="panelText" role="tabpanel" aria-labelledby="tabText"><h2>글자 입력</h2><p class="description" data-device="{d} 화면에서 입력할 위치를 누른 뒤 내용을 보내 주세요.">Mac 화면에서 입력할 위치를 누른 뒤 내용을 보내 주세요.</p><form id="textForm"><textarea id="textInput" rows="3" maxlength="2000" placeholder="여기에 입력해 주세요" aria-label="보낼 텍스트"></textarea><button class="primary" type="submit">텍스트 보내기 <span aria-hidden="true">↗</span></button></form></section>
+          <section class="tab-panel" id="panelKeys" role="tabpanel" aria-labelledby="tabKeys"><h2>키</h2><div class="key-grid"><button data-key="escape">esc</button><button data-key="tab">tab</button><button data-key="backspace" aria-label="백스페이스">⌫</button><button data-key="enter">enter ↵</button><button data-key="left" aria-label="왼쪽 화살표">←</button><button data-key="up" aria-label="위쪽 화살표">↑</button><button data-key="down" aria-label="아래쪽 화살표">↓</button><button data-key="right" aria-label="오른쪽 화살표">→</button></div></section>
+          <section class="tab-panel" id="panelScroll" role="tabpanel" aria-labelledby="tabScroll"><h2>스크롤</h2><div class="scroll-controls"><button data-scroll="-400">↑ 위로 스크롤</button><button data-scroll="400">↓ 아래로 스크롤</button></div></section>
+        </aside>
       </div>
       <p class="feedback control-feedback" id="controlMessage" role="status" aria-live="polite"></p>
     </section>
