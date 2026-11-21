@@ -1,0 +1,40 @@
+name: Publish v2.3.0 release
+
+on:
+  push:
+    branches: [claude/charming-cerf-yjtzxu]
+    paths: [.github/workflows/release-v2.3.0.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test
+        run: python -B -m unittest discover -s tests -v
+      - name: Build files
+        run: |
+          mkdir -p dist/windows/Mac-Remote-2.3.0-windows
+          cp server.py certificates.py internet_tunnel.py fixed_entry.py screen_stream.py windows_helper.py windows_app.py start-windows.bat README.md dist/windows/Mac-Remote-2.3.0-windows/
+          cp -r public dist/windows/Mac-Remote-2.3.0-windows/public
+          cp -r fixed-entry dist/windows/Mac-Remote-2.3.0-windows/fixed-entry
+          (cd dist/windows && zip -qr ../Mac-Remote-2.3.0-windows.zip Mac-Remote-2.3.0-windows)
+          git archive --format=zip --prefix=mac-safari-2.3.0/ -o dist/Mac-Remote-2.3.0-source.zip HEAD
+          (cd dist && sha256sum Mac-Remote-2.3.0-windows.zip Mac-Remote-2.3.0-source.zip > SHA256SUMS.txt)
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v2.3.0 >/dev/null 2>&1; then echo "v2.3.0 release already exists"; exit 0; fi
+          tail -n +3 RELEASE_NOTES_v2.3.0.md > notes.md
+          gh release create v2.3.0 --target "$GITHUB_SHA" --title "Mac 리모컨 v2.3.0" --notes-file notes.md --latest \
+            dist/Mac-Remote-2.3.0-windows.zip dist/Mac-Remote-2.3.0-source.zip dist/SHA256SUMS.txt

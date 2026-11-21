@@ -24,6 +24,12 @@ let gesture = null;
 let statusRequest = null;
 let statusRetry = null;
 let deviceName = 'Mac';
+let streamFailed = false;
+let streamFailures = 0;
+let pendingFrame = null;
+let presenting = false;
+const fpsSelect = $('fpsSelect');
+const stallMs = 8000;
 let wheelTotal = 0;
 let wheelTimer = null;
 let wheelBusy = false;
@@ -96,11 +102,22 @@ function showLogin(message = '') {
   setStatus(false, '연결 안 됨');
 }
 
+function savedFps() {
+  try {
+    const value = localStorage.getItem('macRemoteFps');
+    if (['60', '30', '15', '0'].includes(value)) return value;
+  } catch {}
+  return null;
+}
+
 function showControl() {
   loginView.hidden = true;
   controlView.hidden = false;
   loginMessage.textContent = '';
   if (!session) {
+    fpsSelect.value = savedFps() ?? (internetMode ? '30' : '60');
+    streamFailed = false;
+    streamFailures = 0;
     session = new AbortController();
     $('lastUpdate').textContent = '불러오는 중';
     setStatus(true, '연결됨');
@@ -228,8 +245,117 @@ $('logoutButton').addEventListener('click', async () => {
   if (session === currentSession) showLogin(sessionEnded);
 });
 
+function findPart(buffer) {
+  // One part: headers, a blank line, Content-Length bytes of JPEG, then CRLF.
+  let end = -1;
+  for (let index = 0; index + 3 < buffer.length && index < 512; index++) {
+    if (buffer[index] === 13 && buffer[index + 1] === 10 && buffer[index + 2] === 13 && buffer[index + 3] === 10) { end = index; break; }
+  }
+  if (end < 0) return null;
+  const length = Number(/content-length:\s*(\d+)/i.exec(new TextDecoder().decode(buffer.subarray(0, end)))?.[1]);
+  if (!Number.isInteger(length) || length <= 0 || length > 50 * 1024 * 1024) throw new Error('화면 스트림 형식이 올바르지 않습니다.');
+  const start = end + 4;
+  if (buffer.length < start + length + 2) return null;
+  return { body: buffer.subarray(start, start + length), rest: buffer.subarray(start + length + 2) };
+}
+
+async function showStreamFrame(blob, counters) {
+  const url = URL.createObjectURL(blob);
+  const oldUrl = currentImageUrl;
+  try {
+    screen.src = url;
+    await screen.decode();
+  } catch {
+    URL.revokeObjectURL(url);
+    if (currentImageUrl === oldUrl && oldUrl) screen.src = oldUrl;
+    return;
+  }
+  currentImageUrl = url;
+  if (oldUrl) URL.revokeObjectURL(oldUrl);
+  const size = { width: screen.naturalWidth, height: screen.naturalHeight };
+  if (lastImageSize && (lastImageSize.width !== size.width || lastImageSize.height !== size.height)) gesture = null;
+  lastImageSize = size;
+  $('screenPlaceholder').hidden = true;
+  setStatus(true, '연결됨');
+  counters.shown++;
+}
+
+async function startStream(fps) {
+  clearTimeout(refreshTimer);
+  const request = new AbortController();
+  screenRequest = request;
+  const { signal } = request;
+  const counters = { shown: 0 };
+  let received = 0;
+  let stall = null;
+  let report = null;
+  const arm = () => { clearTimeout(stall); stall = setTimeout(() => request.abort(), stallMs); };
+  const present = async () => {
+    if (presenting) return;
+    presenting = true;
+    try {
+      while (pendingFrame && screenRequest === request) {
+        const blob = pendingFrame;
+        pendingFrame = null;
+        await showStreamFrame(blob, counters);
+      }
+    } finally { presenting = false; }
+  };
+  let failure = null;
+  try {
+    arm();
+    const response = await api(`/api/stream?fps=${fps}`, { signal });
+    const reader = response.body.getReader();
+    let buffer = new Uint8Array(0);
+    let last = performance.now();
+    report = setInterval(() => {
+      const now = performance.now();
+      if (screenRequest === request && counters.shown) $('lastUpdate').textContent = `실시간 ${Math.round(counters.shown * 1000 / (now - last))}fps`;
+      counters.shown = 0;
+      last = now;
+    }, 1000);
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      arm();
+      const joined = new Uint8Array(buffer.length + value.length);
+      joined.set(buffer);
+      joined.set(value, buffer.length);
+      buffer = joined;
+      for (let part = findPart(buffer); part; part = findPart(buffer)) {
+        buffer = part.rest;
+        received++;
+        pendingFrame = new Blob([part.body], { type: 'image/jpeg' });
+        present();
+      }
+    }
+  } catch (error) {
+    failure = error;
+  } finally {
+    clearTimeout(stall);
+    clearInterval(report);
+  }
+  if (screenRequest !== request) return;
+  screenRequest = null;
+  pendingFrame = null;
+  if (failure?.status === 401) return showLogin(sessionEnded);
+  if (received > 0) streamFailures = 0;
+  else if (failure?.status || ++streamFailures >= 2) streamFailed = true;
+  refreshTimer = setTimeout(refreshScreen, received > 0 ? 400 : 200);
+}
+
+fpsSelect.addEventListener('change', () => {
+  try { localStorage.setItem('macRemoteFps', fpsSelect.value); } catch {}
+  streamFailed = false;
+  streamFailures = 0;
+  if (!session || document.hidden) return;
+  cancelScreenRefresh();
+  refreshScreen();
+});
+
 async function refreshScreen() {
   if (!session || document.hidden || !navigator.onLine || screenRequest) return;
+  if (fpsSelect.value !== '0' && !streamFailed && window.ReadableStream) return startStream(Number(fpsSelect.value));
   clearTimeout(refreshTimer);
   const request = new AbortController();
   screenRequest = request;
@@ -289,6 +415,8 @@ async function refreshScreen() {
 $('refreshButton').addEventListener('click', () => {
   if (!session || document.hidden) return;
   cancelScreenRefresh();
+  streamFailed = false;
+  streamFailures = 0;
   if (!lastImageSize) {
     clearScreen();
     $('lastUpdate').textContent = '불러오는 중';

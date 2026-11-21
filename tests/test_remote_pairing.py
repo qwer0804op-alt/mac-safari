@@ -101,7 +101,7 @@ class PairingTest(unittest.TestCase):
         self.assertIsNone(bridge.pending)
 
     def exercise_launcher(self, root, exercise, *options):
-        for name in ('server.py', 'certificates.py', 'internet_tunnel.py', 'fixed_entry.py'):
+        for name in ('server.py', 'certificates.py', 'internet_tunnel.py', 'fixed_entry.py', 'screen_stream.py'):
             shutil.copyfile(ROOT / name, root / name)
         shutil.copytree(ROOT / 'public', root / 'public')
         helper = root / 'native' / 'remote-helper'

@@ -34,7 +34,7 @@
     <section class="control" id="controlView" hidden>
       <div class="intro"><h1>원격 제어</h1><button class="quiet" id="logoutButton">연결 종료</button></div>
       <div class="screen-card card">
-        <div class="screen-toolbar"><span data-device="{d} 화면">Mac 화면</span><button class="icon-button" id="refreshButton" aria-label="화면 새로고침" title="새로고침">↻</button></div>
+        <div class="screen-toolbar"><span data-device="{d} 화면">Mac 화면</span><div class="toolbar-actions"><select id="fpsSelect" class="speed-select" aria-label="화면 갱신 속도"><option value="60">60fps 부드럽게</option><option value="30">30fps</option><option value="15">15fps 데이터 절약</option><option value="0">1초마다 한 장</option></select><button class="icon-button" id="refreshButton" aria-label="화면 새로고침" title="새로고침">↻</button></div></div>
         <div class="screen-wrap"><img id="screen" alt="Mac 화면. 누르면 해당 위치를 클릭합니다." draggable="false"><div class="screen-placeholder" id="screenPlaceholder"><span class="spinner" id="screenSpinner" aria-hidden="true"></span><span id="screenMessage">화면을 불러오는 중</span></div></div>
         <textarea id="keyCatcher" class="key-catcher" rows="1" tabindex="-1" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="컴퓨터 키보드 입력"></textarea>
         <div class="screen-footer"><span>탭·클릭으로 누르기</span><span>밀거나 휠로 스크롤</span><span>컴퓨터는 화면을 누른 뒤 키보드로 입력</span><span id="lastUpdate">연결 중</span></div>

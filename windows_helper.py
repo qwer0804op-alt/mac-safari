@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 
 WHEEL_DELTA = 120
 WHEEL_PER_SCROLL = 1.2
@@ -155,6 +156,54 @@ class INPUT_UNION(ctypes.Union):
 class INPUT(ctypes.Structure):
     _anonymous_ = ('union',)
     _fields_ = [('type', DWORD), ('union', INPUT_UNION)]
+
+
+_dpi_ready = False
+
+
+def make_dpi_aware():
+    global _dpi_ready
+    if _dpi_ready or os.name != 'nt':
+        return
+    _dpi_ready = True
+    try:
+        ctypes.WinDLL('shcore').SetProcessDpiAwareness(2)
+    except (OSError, AttributeError):
+        ctypes.WinDLL('user32').SetProcessDPIAware()
+
+
+def grab_jpeg(quality=65):
+    """Capture the primary screen in this process. mss and Pillow make this fast enough for live video."""
+    import io
+    make_dpi_aware()
+    try:
+        from PIL import Image
+    except ImportError:
+        Image = None
+    if Image is not None:
+        try:
+            import mss
+        except ImportError:
+            mss = None
+        try:
+            if mss is not None:
+                with mss.mss() as grabber:
+                    shot = grabber.grab(grabber.monitors[1])
+                    image = Image.frombytes('RGB', shot.size, shot.bgra, 'raw', 'BGRX')
+            else:
+                from PIL import ImageGrab
+                image = ImageGrab.grab().convert('RGB')
+            buffer = io.BytesIO()
+            image.save(buffer, 'JPEG', quality=quality)
+            return buffer.getvalue()
+        except OSError:
+            raise HelperError('Windows 화면을 캡처할 수 없습니다. 화면이 잠겨 있지 않은지 확인해 주세요.') from None
+    # Without Pillow, fall back to one PowerShell capture per frame (slow).
+    with tempfile.TemporaryDirectory(prefix='macremote-screen-') as folder:
+        path = os.path.join(folder, 'screen.jpg')
+        Win32Backend.screenshot_with_powershell(None, path)
+        with open(path, 'rb') as handle:
+            return handle.read()
 
 
 class Win32Backend:

@@ -289,6 +289,23 @@ button:disabled { opacity: .55; cursor: wait; }
 
 .screen-footer span:last-child { margin-left: auto; }
 
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.speed-select {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--input);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
 .key-catcher {
   position: fixed;
   left: 0;

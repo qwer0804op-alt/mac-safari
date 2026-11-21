@@ -15,12 +15,13 @@ import webbrowser
 from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
 from certificates import CertificateStore, local_addresses
 from fixed_entry import PROOF_PATH, QUICK_HOST, FixedEntry, load_origin, normalize_origin
 from internet_tunnel import quick_tunnel
+from screen_stream import FrameHub, clamp_fps
 
 ROOT = Path(__file__).resolve().parent
 PUBLIC = ROOT / 'public'
@@ -314,6 +315,7 @@ class RemoteState:
 class RemoteHTTPServer(ThreadingHTTPServer):
     def __init__(self, address, context, state, app_capture=None, app_input=None, fixed_entry=None):
         self.fixed_entry = fixed_entry
+        self.frames = FrameHub(self.capture_frame)
         self.context = context
         self.state = state
         self.app_capture = app_capture
@@ -322,7 +324,13 @@ class RemoteHTTPServer(ThreadingHTTPServer):
         self.request_slots = threading.BoundedSemaphore(24) if state.internet else None
         super().__init__(address, Handler)
 
+    def capture_frame(self):
+        if self.app_capture is not None:
+            return self.app_capture.read()
+        return capture_with_helper()
+
     def stop_operations(self):
+        self.frames.stop()
         if self.app_capture is not None:
             self.app_capture.stop()
         if self.app_input is not None:
@@ -399,6 +407,12 @@ def run_helper(args, timeout=15):
 
 
 def capture_with_helper():
+    if sys.platform == 'win32':
+        import windows_helper
+        try:
+            return windows_helper.grab_jpeg()
+        except windows_helper.HelperError as exc:
+            raise RuntimeError(str(exc)) from None
     with tempfile.TemporaryDirectory(prefix='macremote-screen-') as tmp:
         image_path = Path(tmp) / 'screen.jpg'
         run_helper(['screenshot', str(image_path)])
@@ -412,10 +426,7 @@ class Handler(BaseHTTPRequestHandler):
         # Never log access codes, session cookies, or messages.
         pass
 
-    def send_bytes(self, status, body, content_type, headers=()):
-        self.send_response(status)
-        self.send_header('Content-Type', content_type)
-        self.send_header('Content-Length', str(len(body)))
+    def send_security_headers(self):
         self.send_header('Cache-Control', 'no-store')
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('X-Frame-Options', 'DENY')
@@ -423,6 +434,12 @@ class Handler(BaseHTTPRequestHandler):
         if self.server.state.internet:
             self.send_header('X-Robots-Tag', 'noindex, nofollow')
         self.send_header('Content-Security-Policy', "default-src 'self'; img-src 'self' blob:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'")
+
+    def send_bytes(self, status, body, content_type, headers=()):
+        self.send_response(status)
+        self.send_header('Content-Type', content_type)
+        self.send_header('Content-Length', str(len(body)))
+        self.send_security_headers()
         for name, value in headers:
             self.send_header(name, value)
         self.end_headers()
@@ -472,6 +489,39 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError('요청 형식이 올바르지 않습니다.')
         return result
 
+    def stream_screen(self, query):
+        if not self.authenticated():
+            return self.send_json(401, {'error': '먼저 연결 코드를 입력해 주세요.'})
+        hub = self.server.frames
+        try:
+            viewer = hub.subscribe(clamp_fps(parse_qs(query).get('fps', [None])[0]))
+        except RuntimeError as exc:
+            return self.send_json(503, {'error': str(exc)[:800]})
+        try:
+            try:
+                seq, frame = hub.wait_first()
+            except RuntimeError as exc:
+                return self.send_json(503, {'error': str(exc)[:800]})
+            self.send_response(200)
+            self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=frame')
+            self.send_security_headers()
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            self.close_connection = True
+            while True:
+                head = f'--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {len(frame)}\r\n\r\n'.encode()
+                self.wfile.write(head + frame + b'\r\n')
+                self.wfile.flush()
+                update = hub.wait_next(seq)
+                if update is None or not self.authenticated():
+                    return
+                # A repeated frame is a keep-alive for a screen that did not change.
+                seq, frame, _ = update
+        except (OSError, ValueError):
+            return
+        finally:
+            hub.unsubscribe(viewer)
+
     def send_proof(self, nonce):
         # The fixed entry site asks for a signature over a fresh nonce to prove who owns this address.
         entry, host = self.server.fixed_entry, self.server.public_host
@@ -492,6 +542,8 @@ class Handler(BaseHTTPRequestHandler):
         proof = PROOF_PATH.fullmatch(path)
         if proof is not None and self.server.fixed_entry is not None:
             return self.send_proof(proof[1])
+        if path == '/api/stream':
+            return self.stream_screen(urlsplit(self.path).query)
         if path == '/api/status':
             return self.send_json(200, {'authenticated': self.authenticated(), 'internet': self.server.state.internet, 'platform': 'windows' if sys.platform == 'win32' else 'mac'})
         if path == '/api/screen':
