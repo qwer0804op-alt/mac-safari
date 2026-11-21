@@ -285,7 +285,23 @@ button:disabled { opacity: .55; cursor: wait; }
   font-size: 12px;
 }
 
+.screen-footer { flex-wrap: wrap; row-gap: 4px; }
+
 .screen-footer span:last-child { margin-left: auto; }
+
+.key-catcher {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  resize: none;
+  font-size: 16px;
+  pointer-events: none;
+}
 
 .tools-grid {
   display: grid;

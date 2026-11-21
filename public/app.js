@@ -23,6 +23,16 @@ let inputGeneration = 0;
 let gesture = null;
 let statusRequest = null;
 let statusRetry = null;
+let deviceName = 'Mac';
+let wheelTotal = 0;
+let wheelTimer = null;
+let wheelBusy = false;
+const keyCatcher = $('keyCatcher');
+const keyNames = {
+  Enter: 'enter', Tab: 'tab', Escape: 'escape', Backspace: 'backspace', Delete: 'delete',
+  ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
+  Home: 'home', End: 'end', PageUp: 'pageup', PageDown: 'pagedown',
+};
 
 function setStatus(connected, text) {
   $('statusDot').classList.toggle('connected', connected);
@@ -31,8 +41,16 @@ function setStatus(connected, text) {
 
 function connectionError() {
   return internetMode
-    ? 'Mac에 연결할 수 없습니다. Mac 리모컨에서 인터넷 공유 상태를 확인해 주세요.'
-    : 'Mac에 연결할 수 없습니다. Wi-Fi와 Mac 리모컨 실행 상태를 확인해 주세요.';
+    ? `${deviceName}에 연결할 수 없습니다. Mac 리모컨에서 인터넷 공유 상태를 확인해 주세요.`
+    : `${deviceName}에 연결할 수 없습니다. Wi-Fi와 Mac 리모컨 실행 상태를 확인해 주세요.`;
+}
+
+function applyPlatform(platform) {
+  deviceName = platform === 'windows' ? 'PC' : 'Mac';
+  document.querySelectorAll('[data-device]').forEach((element) => {
+    element.textContent = element.dataset.device.replace('{d}', deviceName);
+  });
+  screen.alt = `${deviceName} 화면. 누르면 해당 위치를 클릭합니다.`;
 }
 
 function clearScreen(message = '화면을 불러오는 중', loading = true) {
@@ -55,6 +73,10 @@ function cancelScreenRefresh() {
 
 function pauseScreen(message, loading) {
   inputGeneration++;
+  clearTimeout(wheelTimer);
+  wheelTimer = null;
+  wheelTotal = 0;
+  keyCatcher.value = '';
   cancelScreenRefresh();
   clearScreen(message, loading);
 }
@@ -122,6 +144,7 @@ async function checkStatus() {
     const status = await response.json();
     if (statusRequest !== request) return;
     internetMode = status.internet === true;
+    applyPlatform(status.platform);
     if (internetMode) $('codeHint').textContent = 'Mac 리모컨의 4자리 코드를 입력한 다음, Mac에서 연결을 승인해 주세요.';
     if (status.authenticated === true) showControl();
     else {
@@ -357,6 +380,8 @@ screen.addEventListener('pointerup', (event) => {
       const x = Math.max(0, Math.min(lastImageSize.width - 1, Math.floor((event.clientX - rect.left) / rect.width * lastImageSize.width)));
       const y = Math.max(0, Math.min(lastImageSize.height - 1, Math.floor((event.clientY - rect.top) / rect.height * lastImageSize.height)));
       sendAction({ type: 'click', x, y });
+      // Only a mouse focuses the hidden keyboard field, so phones keep their on-screen keyboard closed.
+      if (event.pointerType === 'mouse') keyCatcher.focus({ preventScroll: true });
     }
   }
   gesture = null;
@@ -367,6 +392,48 @@ function cancelGesture(event) {
 
 screen.addEventListener('pointercancel', cancelGesture);
 screen.addEventListener('lostpointercapture', cancelGesture);
+
+screen.addEventListener('wheel', (event) => {
+  if (!session || !lastImageSize) return;
+  event.preventDefault();
+  const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? screen.clientHeight : 1;
+  wheelTotal += event.deltaY * unit;
+  if (!wheelTimer && !wheelBusy) wheelTimer = setTimeout(flushWheel, 50);
+}, { passive: false });
+
+async function flushWheel() {
+  wheelTimer = null;
+  const dy = Math.max(-1000, Math.min(1000, Math.round(wheelTotal * 2)));
+  wheelTotal = 0;
+  if (!dy) return;
+  wheelBusy = true;
+  try {
+    await sendAction({ type: 'scroll', dy });
+  } finally {
+    wheelBusy = false;
+    if (wheelTotal && !wheelTimer) wheelTimer = setTimeout(flushWheel, 50);
+  }
+}
+
+function flushTyped() {
+  const text = keyCatcher.value.replaceAll('\0', '');
+  keyCatcher.value = '';
+  if (!text || !session) return;
+  const characters = Array.from(text);
+  for (let index = 0; index < characters.length; index += 1000) {
+    sendAction({ type: 'type', text: characters.slice(index, index + 1000).join('') });
+  }
+}
+
+keyCatcher.addEventListener('keydown', (event) => {
+  if (event.isComposing || event.keyCode === 229 || event.ctrlKey || event.metaKey || event.altKey) return;
+  const key = keyNames[event.key];
+  if (!key) return;
+  event.preventDefault();
+  sendAction({ type: 'key', key });
+});
+keyCatcher.addEventListener('input', (event) => { if (!event.isComposing) flushTyped(); });
+keyCatcher.addEventListener('compositionend', flushTyped);
 
 $('textForm').addEventListener('submit', async (event) => {
   event.preventDefault();
